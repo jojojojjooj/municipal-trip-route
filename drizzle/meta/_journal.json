@@ -1,0 +1,97 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1787293803606,
+      "tag": "0000_married_the_twelve",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1787301927240,
+      "tag": "0001_jazzy_paper_doll",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1787323081178,
+      "tag": "0002_flippant_starfox",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1787324696489,
+      "tag": "0003_dusty_electro",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1787325856218,
+      "tag": "0004_skinny_vision",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1787326633874,
+      "tag": "0005_slow_lucky_pierre",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1787328815876,
+      "tag": "0006_uneven_joshua_kane",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1787383792762,
+      "tag": "0007_lying_magneto",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1787383843534,
+      "tag": "0008_purple_hemingway",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1787405086090,
+      "tag": "0009_mixed_blade",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1787417793310,
+      "tag": "0010_majestic_rachel_grey",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1787418008041,
+      "tag": "0011_luxuriant_sabretooth",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1787423330874,
+      "tag": "0012_lazy_jane_foster",
+      "breakpoints": true
+    }
+  ]
+}

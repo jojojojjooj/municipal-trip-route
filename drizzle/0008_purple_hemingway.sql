@@ -1,0 +1,1 @@
+ALTER TABLE `tripDrafts` MODIFY COLUMN `payload` mediumtext NOT NULL;

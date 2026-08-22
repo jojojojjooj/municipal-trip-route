@@ -1,0 +1,1 @@
+ALTER TABLE `trips` ADD `returnToStart` boolean DEFAULT false NOT NULL;

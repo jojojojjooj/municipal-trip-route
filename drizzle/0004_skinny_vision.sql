@@ -1,0 +1,1 @@
+ALTER TABLE `tripStops` ADD `note` varchar(1000);
