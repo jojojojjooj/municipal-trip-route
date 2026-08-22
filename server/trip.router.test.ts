@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TrpcContext } from "./_core/context";
 import { createTripDraftEnvelope } from "../shared/tripDraft";
 
@@ -56,7 +56,15 @@ const input = {
 };
 
 describe("trip router", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("KAKAO_REST_API_KEY", "test-kakao-rest-key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
 
   it("creates a user-owned trip with a generated share token", async () => {
     dbMocks.createTrip.mockResolvedValue({ id: 11, ...input, shareToken: "share-token", stops: input.stops });
