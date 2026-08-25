@@ -17,7 +17,10 @@ export function optimizeRouteFromFixedStart(
   options: OptimizeOptions = {}
 ) {
   const points = fixedStart ? [fixedStart, ...stops] : stops;
-  const summary = optimizeRoute(points, options);
+  const summary = optimizeRoute(points, {
+    ...options,
+    startsWithFixedPoint: fixedStart !== null,
+  });
   const shouldReturn =
     returnToStart && fixedStart !== null && summary.orderedIds.length > 1;
   const lastPoint = points.find(

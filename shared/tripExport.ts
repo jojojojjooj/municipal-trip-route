@@ -3,6 +3,7 @@ import {
   isExecutionStatus,
   type ExecutionStatus,
 } from "./tripOperations";
+import { isTimeOfDay } from "./tripSchedule";
 
 export type CsvStop = {
   sequence: number;
@@ -17,6 +18,9 @@ export type CsvStop = {
   issueDueAt?: string;
   issueResolvedAt?: string;
   note?: string;
+  serviceMinutes?: number;
+  windowStart?: string;
+  windowEnd?: string;
 };
 
 export type ParsedTripStopsCsv = {
@@ -25,7 +29,7 @@ export type ParsedTripStopsCsv = {
   stops: CsvStop[];
 };
 
-const CSV_HEADERS = [
+const LEGACY_CSV_HEADERS = [
   "출장명",
   "출장일",
   "순서",
@@ -40,6 +44,12 @@ const CSV_HEADERS = [
   "조치 기한",
   "해결 시각",
   "현장 메모",
+] as const;
+const CSV_HEADERS = [
+  ...LEGACY_CSV_HEADERS,
+  "체류 시간(분)",
+  "방문 가능 시작",
+  "방문 가능 종료",
 ] as const;
 const STATUS_BY_LABEL: Record<string, ExecutionStatus> = {
   예정: "planned",
@@ -111,6 +121,32 @@ function parseStatus(value: string, rowNumber: number): ExecutionStatus {
   );
 }
 
+function parseServiceMinutes(value: string, rowNumber: number) {
+  const normalized = value.trim();
+  if (!normalized) return 20;
+  const parsed = Number(normalized);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 480)
+    throw new Error(
+      `${rowNumber}행의 체류 시간(분)은 0~480 사이의 정수여야 합니다.`
+    );
+  return parsed;
+}
+
+function parseOptionalTime(value: string, label: string, rowNumber: number) {
+  const normalized = value.trim();
+  if (!normalized) return undefined;
+  if (!isTimeOfDay(normalized))
+    throw new Error(`${rowNumber}행의 ${label}은 HH:mm 형식이어야 합니다.`);
+  return normalized;
+}
+
+function hasMatchingHeaders(header: string[], expected: readonly string[]) {
+  return (
+    header.length === expected.length &&
+    expected.every((label, index) => label === header[index])
+  );
+}
+
 export function makeTripStopsCsv(
   title: string,
   tripDate: string,
@@ -131,8 +167,13 @@ export function makeTripStopsCsv(
     stop.issueDueAt ?? "",
     stop.issueResolvedAt ?? "",
     stop.note ?? "",
+    stop.serviceMinutes ?? 20,
+    stop.windowStart ?? "",
+    stop.windowEnd ?? "",
   ]);
-  return `\uFEFF${[CSV_HEADERS, ...rows].map(row => row.map(escapeCsv).join(",")).join("\r\n")}`;
+  return `\uFEFF${[CSV_HEADERS, ...rows]
+    .map(row => row.map(escapeCsv).join(","))
+    .join("\r\n")}`;
 }
 
 export function parseTripStopsCsv(input: string): ParsedTripStopsCsv {
@@ -143,11 +184,13 @@ export function parseTripStopsCsv(input: string): ParsedTripStopsCsv {
   if (!rows.length) throw new Error("CSV 파일에 데이터가 없습니다.");
 
   const header = rows[0].map(cell => cell.trim());
-  const hasExpectedHeader =
-    CSV_HEADERS.length === header.length &&
-    CSV_HEADERS.every((label, index) => label === header[index]);
-  if (!hasExpectedHeader)
+  const isCurrentFormat = hasMatchingHeaders(header, CSV_HEADERS);
+  const isLegacyFormat = hasMatchingHeaders(header, LEGACY_CSV_HEADERS);
+  if (!isCurrentFormat && !isLegacyFormat)
     throw new Error("여정도에서 내보낸 목적지 CSV 형식이 아닙니다.");
+  const headerLength = isCurrentFormat
+    ? CSV_HEADERS.length
+    : LEGACY_CSV_HEADERS.length;
 
   const dataRows = rows.slice(1);
   if (!dataRows.length) throw new Error("CSV 파일에 가져올 목적지가 없습니다.");
@@ -161,9 +204,9 @@ export function parseTripStopsCsv(input: string): ParsedTripStopsCsv {
       const rowNumber = rowIndex + 2;
       const row = [
         ...rawRow,
-        ...Array.from({ length: CSV_HEADERS.length - rawRow.length }, () => ""),
-      ].slice(0, CSV_HEADERS.length);
-      if (rawRow.length > CSV_HEADERS.length)
+        ...Array.from({ length: headerLength - rawRow.length }, () => ""),
+      ].slice(0, headerLength);
+      if (rawRow.length > headerLength)
         throw new Error(`${rowNumber}행의 열 개수가 헤더와 다릅니다.`);
 
       const name = row[3]?.trim() ?? "";
@@ -196,6 +239,15 @@ export function parseTripStopsCsv(input: string): ParsedTripStopsCsv {
         issueDueAt: row[11]?.trim() || undefined,
         issueResolvedAt: row[12]?.trim() || undefined,
         note: row[13]?.trim() || undefined,
+        serviceMinutes: isCurrentFormat
+          ? parseServiceMinutes(row[14] ?? "", rowNumber)
+          : 20,
+        windowStart: isCurrentFormat
+          ? parseOptionalTime(row[15] ?? "", "방문 가능 시작", rowNumber)
+          : undefined,
+        windowEnd: isCurrentFormat
+          ? parseOptionalTime(row[16] ?? "", "방문 가능 종료", rowNumber)
+          : undefined,
       } satisfies CsvStop;
     })
     .sort((a, b) => a.sequence - b.sequence);

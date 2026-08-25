@@ -64,7 +64,6 @@ import {
   makeTripResultHwpxFileName,
 } from "@shared/tripResultHwpx";
 import {
-  buildVisitSchedule,
   EMPTY_TRIP_CHECKLIST,
   executionStatusLabel,
   getChecklistProgress,
@@ -1221,6 +1220,7 @@ function TripResultReportPdfWithEvidence({
 function PdfReport({
   title,
   tripDate,
+  departureTime,
   managerName,
   fixedStart,
   returnToStart,
@@ -1233,6 +1233,7 @@ function PdfReport({
 }: {
   title: string;
   tripDate: string;
+  departureTime: string;
   managerName: string;
   fixedStart: FixedStartLocation | null;
   returnToStart: boolean;
@@ -1249,11 +1250,21 @@ function PdfReport({
     timeStyle: "short",
   }).format(new Date());
   const operationSummary = getTripOperationSummary(destinations);
-  const visitSchedule = buildVisitSchedule(
+  const constrainedSchedule = buildConstrainedVisitSchedule({
     tripDate,
-    durationMinutes,
-    destinations.length
-  );
+    departureTime,
+    routeDurationMinutes: durationMinutes,
+    stops: destinations.map(destination => ({
+      id: destination.id,
+      serviceMinutes: destination.serviceMinutes,
+      windowStart: destination.windowStart,
+      windowEnd: destination.windowEnd,
+    })),
+  });
+  const timeFormatter = new Intl.DateTimeFormat("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
   return (
     <div
@@ -1304,6 +1315,21 @@ function PdfReport({
             <p className="mt-1 text-sm text-stone-600">{fixedStart.address}</p>
           </div>
         ) : null}
+        <div className="mt-5 border-l-2 border-[#2f6557] bg-[#edf3ed] px-5 py-4">
+          <p className="text-[10px] font-bold uppercase tracking-[.2em] text-[#2f6557]">
+            Visit schedule
+          </p>
+          <p className="mt-2 text-sm font-semibold">
+            {departureTime || "09:00"} 출발 · 현장 체류{" "}
+            {constrainedSchedule.totalServiceMinutes}분 · 대기{" "}
+            {constrainedSchedule.totalWaitMinutes}분
+          </p>
+          {constrainedSchedule.violations.length ? (
+            <p className="mt-1 text-xs text-[#b4533d]">
+              시간창 경고 {constrainedSchedule.violations.length}건
+            </p>
+          ) : null}
+        </div>
       </header>
 
       <section className="mt-8 grid grid-cols-3 gap-3">
@@ -1442,83 +1468,96 @@ function PdfReport({
           </p>
         </div>
         <ol className="divide-y divide-[#1f2d2b]/15">
-          {destinations.map((destination, index) => (
-            <li
-              key={destination.id}
-              className="grid grid-cols-[42px_1fr] gap-4 py-4"
-            >
-              <span className="pdf-accent font-display text-2xl text-[#c4503d]">
-                {String(index + 1).padStart(2, "0")}
-              </span>
-              <div>
-                <p className="font-semibold">{destination.name}</p>
-                <p className="mt-1 text-sm text-stone-600">
-                  {destination.address}
-                </p>
-                <p className="mt-2 text-xs font-semibold text-[#8a5a50]">
-                  예상 도착 ·{" "}
-                  {new Intl.DateTimeFormat("ko-KR", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  }).format(visitSchedule[index]?.arrival)}{" "}
-                  · 상태{" "}
-                  {executionStatusLabel(
-                    destination.executionStatus ?? "planned"
-                  )}
-                </p>
-                {destination.completedAt ? (
-                  <p className="mt-1 text-xs text-[#2f6557]">
-                    완료 시각 ·{" "}
-                    {new Intl.DateTimeFormat("ko-KR", {
-                      dateStyle: "short",
-                      timeStyle: "short",
-                    }).format(new Date(destination.completedAt))}
+          {destinations.map((destination, index) => {
+            const visit = constrainedSchedule.stops[index];
+            const visitTiming = visit
+              ? `예정 방문 · ${timeFormatter.format(visit.visitStart)}–${timeFormatter.format(visit.visitEnd)} · 체류 ${visit.serviceMinutes}분`
+              : "예정 방문 · 시간 미정";
+            const timeWindow =
+              destination.windowStart || destination.windowEnd
+                ? ` · 가능 ${destination.windowStart ?? ""}–${destination.windowEnd ?? ""}`
+                : "";
+            const timeWarning =
+              visit?.status === "late"
+                ? " · 시간창 지연"
+                : visit?.status === "invalid_window"
+                  ? " · 시간창 입력 오류"
+                  : "";
+            return (
+              <li
+                key={destination.id}
+                className="grid grid-cols-[42px_1fr] gap-4 py-4"
+              >
+                <span className="pdf-accent font-display text-2xl text-[#c4503d]">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <div>
+                  <p className="font-semibold">{destination.name}</p>
+                  <p className="mt-1 text-sm text-stone-600">
+                    {destination.address}
                   </p>
-                ) : null}
-                {destination.issueNote ||
-                destination.issueOwner ||
-                destination.issueDueAt ? (
-                  <div className="mt-2 border-l-2 border-[#c4503d] pl-3 text-xs leading-5 text-[#8a5a50]">
-                    <p>이슈 · {destination.issueNote || "기록 미입력"}</p>
-                    <p>
-                      담당 · {destination.issueOwner || "미지정"}
-                      {destination.issueDueAt
-                        ? ` · 기한 ${destination.issueDueAt}`
-                        : ""}
-                      {destination.issueResolvedAt
-                        ? ` · 해결 ${new Intl.DateTimeFormat("ko-KR", { dateStyle: "short", timeStyle: "short" }).format(new Date(destination.issueResolvedAt))}`
-                        : ""}
+                  <p className="mt-2 text-xs font-semibold text-[#8a5a50]">
+                    {visitTiming}
+                    {timeWindow}
+                    {timeWarning} · 상태{" "}
+                    {executionStatusLabel(
+                      destination.executionStatus ?? "planned"
+                    )}
+                  </p>
+                  {destination.completedAt ? (
+                    <p className="mt-1 text-xs text-[#2f6557]">
+                      완료 시각 ·{" "}
+                      {new Intl.DateTimeFormat("ko-KR", {
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      }).format(new Date(destination.completedAt))}
                     </p>
-                  </div>
-                ) : null}
-                {destination.note ? (
-                  <div className="pdf-stop-note">
-                    <StickyNote className="h-3.5 w-3.5" />
-                    <span>{destination.note}</span>
-                  </div>
-                ) : null}
-                {destination.photos?.length ? (
-                  <div className="pdf-photo-grid">
-                    {destination.photos.slice(0, 3).map(photo => (
-                      <figure key={photo.storageKey}>
-                        <img
-                          data-trip-photo-key={photo.storageKey}
-                          src={photo.dataUrl ?? photo.url}
-                          alt={`${destination.name} 현장 사진`}
-                        />
-                        {photo.takenAt || photo.description ? (
-                          <figcaption>
-                            {photo.takenAt ? `${photo.takenAt} · ` : ""}
-                            {photo.description ?? ""}
-                          </figcaption>
-                        ) : null}
-                      </figure>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            </li>
-          ))}
+                  ) : null}
+                  {destination.issueNote ||
+                  destination.issueOwner ||
+                  destination.issueDueAt ? (
+                    <div className="mt-2 border-l-2 border-[#c4503d] pl-3 text-xs leading-5 text-[#8a5a50]">
+                      <p>이슈 · {destination.issueNote || "기록 미입력"}</p>
+                      <p>
+                        담당 · {destination.issueOwner || "미지정"}
+                        {destination.issueDueAt
+                          ? ` · 기한 ${destination.issueDueAt}`
+                          : ""}
+                        {destination.issueResolvedAt
+                          ? ` · 해결 ${new Intl.DateTimeFormat("ko-KR", { dateStyle: "short", timeStyle: "short" }).format(new Date(destination.issueResolvedAt))}`
+                          : ""}
+                      </p>
+                    </div>
+                  ) : null}
+                  {destination.note ? (
+                    <div className="pdf-stop-note">
+                      <StickyNote className="h-3.5 w-3.5" />
+                      <span>{destination.note}</span>
+                    </div>
+                  ) : null}
+                  {destination.photos?.length ? (
+                    <div className="pdf-photo-grid">
+                      {destination.photos.slice(0, 3).map(photo => (
+                        <figure key={photo.storageKey}>
+                          <img
+                            data-trip-photo-key={photo.storageKey}
+                            src={photo.dataUrl ?? photo.url}
+                            alt={`${destination.name} 현장 사진`}
+                          />
+                          {photo.takenAt || photo.description ? (
+                            <figcaption>
+                              {photo.takenAt ? `${photo.takenAt} · ` : ""}
+                              {photo.description ?? ""}
+                            </figcaption>
+                          ) : null}
+                        </figure>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </li>
+            );
+          })}
         </ol>
       </section>
 
@@ -1804,11 +1843,20 @@ export default function Home() {
           id: destination.id,
           latitude: destination.latitude,
           longitude: destination.longitude,
+          serviceMinutes: destination.serviceMinutes,
+          windowStart: destination.windowStart,
+          windowEnd: destination.windowEnd,
         })),
         returnToStart,
-        { strategy: optimizationStrategy }
+        { strategy: optimizationStrategy, departureTime }
       ),
-    [destinations, fixedStart, optimizationStrategy, returnToStart]
+    [
+      departureTime,
+      destinations,
+      fixedStart,
+      optimizationStrategy,
+      returnToStart,
+    ]
   );
   const operationSummary = useMemo(
     () => getTripOperationSummary(destinations),
@@ -2746,6 +2794,9 @@ export default function Home() {
           issueOwner: stop.issueOwner,
           issueDueAt: stop.issueDueAt,
           issueResolvedAt: stop.issueResolvedAt,
+          serviceMinutes: stop.serviceMinutes,
+          windowStart: stop.windowStart,
+          windowEnd: stop.windowEnd,
         });
       });
       if (!importedStops.length)
@@ -2818,6 +2869,7 @@ export default function Home() {
         tripDate,
         managerName,
         department,
+        departureTime,
         returnToStart,
         fixedStartName: fixedStart?.name,
         routeDistanceKm: routeSummary.totalDistanceKm,
@@ -2827,6 +2879,9 @@ export default function Home() {
           name: destination.name,
           address: destination.address,
           note: destination.note,
+          serviceMinutes: destination.serviceMinutes,
+          windowStart: destination.windowStart,
+          windowEnd: destination.windowEnd,
         })),
       });
       const url = URL.createObjectURL(
@@ -2855,6 +2910,7 @@ export default function Home() {
       const source = await utils.trip.get.fetch({ id: tripId });
       setTitle(`${source.title} 사본`);
       setTripDate(toIsoDate(source.tripDate));
+      setDepartureTime(source.departureTime ?? "09:00");
       setManagerName(source.managerName);
       setDepartment(source.department ?? "");
       setFixedStart(
@@ -2890,6 +2946,9 @@ export default function Home() {
               description: photo.description ?? undefined,
             })) ?? [],
           executionStatus: "planned",
+          serviceMinutes: stop.serviceMinutes ?? 20,
+          windowStart: stop.windowStart ?? undefined,
+          windowEnd: stop.windowEnd ?? undefined,
         }))
       );
       setResultReportDraft(null);
@@ -4200,6 +4259,7 @@ export default function Home() {
                   >
                     <option value="quality">정밀 경로</option>
                     <option value="fast">빠른 경로</option>
+                    <option value="schedule">시간창 우선</option>
                   </select>
                   <span
                     className={
@@ -4262,7 +4322,9 @@ export default function Home() {
                         ? "복귀 구간까지 포함한 왕복 동선을 준비했습니다."
                         : optimizationStrategy === "quality"
                           ? "거리 행렬 + 다중 후보 + best 2-opt로 정밀 방문 순서를 계산합니다."
-                          : "거리 행렬 + Nearest Neighbor + best 2-opt로 빠르게 계산합니다."
+                          : optimizationStrategy === "schedule"
+                            ? "방문 가능 시간대·지연 위험·완료 시각을 우선 비교해 방문 순서를 계산합니다."
+                            : "거리 행렬 + Nearest Neighbor + best 2-opt로 빠르게 계산합니다."
                       : "목적지를 2곳 이상 등록하면 최적 동선 계산을 시작합니다."}
                   </small>
                 </span>
@@ -5407,6 +5469,7 @@ export default function Home() {
         reportRef={reportRef}
         title={title}
         tripDate={tripDate}
+        departureTime={departureTime}
         managerName={managerName}
         fixedStart={fixedStart}
         returnToStart={returnToStart}

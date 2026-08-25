@@ -2,12 +2,17 @@ export type RoutePoint = {
   id: string;
   latitude: number;
   longitude: number;
+  serviceMinutes?: number;
+  windowStart?: string;
+  windowEnd?: string;
 };
 
-export type OptimizationStrategy = "fast" | "quality";
+export type OptimizationStrategy = "fast" | "quality" | "schedule";
 
 export type OptimizeOptions = {
   strategy?: OptimizationStrategy;
+  departureTime?: string;
+  startsWithFixedPoint?: boolean;
 };
 
 export type RouteSummary = {
@@ -20,6 +25,7 @@ export type RouteSummary = {
 const EARTH_RADIUS_KM = 6371;
 const AVERAGE_CITY_SPEED_KMH = 32;
 const TWO_OPT_EPSILON_KM = 0.0001;
+const DEFAULT_DEPARTURE_MINUTES = 9 * 60;
 
 function toRadians(degrees: number) {
   return (degrees * Math.PI) / 180;
@@ -74,6 +80,28 @@ function routeDistanceByIndex(route: number[], matrix: DistanceMatrix) {
     total += matrix[route[index - 1]][route[index]];
   }
   return total;
+}
+
+function travelMinutes(distance: number) {
+  return Math.ceil((Math.max(0, distance) / AVERAGE_CITY_SPEED_KMH) * 60);
+}
+
+function timeOfDayToMinutes(value: string | undefined) {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value ?? "");
+  return match ? Number(match[1]) * 60 + Number(match[2]) : undefined;
+}
+
+function normalizedServiceMinutes(value: number | undefined) {
+  if (!Number.isFinite(value)) return 20;
+  return Math.min(Math.max(Math.round(value as number), 0), 480);
+}
+
+function compareNumberTuples(left: number[], right: number[]) {
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    const difference = (left[index] ?? 0) - (right[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
 }
 
 function nearestNeighborIndices(pointCount: number, matrix: DistanceMatrix) {
@@ -150,6 +178,161 @@ function cheapestInsertionIndices(pointCount: number, matrix: DistanceMatrix) {
   return route;
 }
 
+type ScheduleScore = {
+  invalidWindows: number;
+  lateStops: number;
+  lateMinutes: number;
+  finishMinutes: number;
+  totalDistanceKm: number;
+};
+
+function scoreScheduleRoute(
+  route: number[],
+  points: RoutePoint[],
+  matrix: DistanceMatrix,
+  options: OptimizeOptions
+): ScheduleScore {
+  const departureMinutes =
+    timeOfDayToMinutes(options.departureTime) ?? DEFAULT_DEPARTURE_MINUTES;
+  const firstVisitIndex = options.startsWithFixedPoint ? 1 : 0;
+  let cursor = departureMinutes;
+  let invalidWindows = 0;
+  let lateStops = 0;
+  let lateMinutes = 0;
+
+  for (let position = firstVisitIndex; position < route.length; position += 1) {
+    const point = points[route[position]];
+    const previous = position > 0 ? route[position - 1] : undefined;
+    const arrival =
+      previous === undefined
+        ? cursor
+        : cursor + travelMinutes(matrix[previous][route[position]]);
+    const windowStart = timeOfDayToMinutes(point.windowStart);
+    const windowEnd = timeOfDayToMinutes(point.windowEnd);
+    const invalidWindow =
+      windowStart !== undefined &&
+      windowEnd !== undefined &&
+      windowStart > windowEnd;
+    const visitStart =
+      windowStart !== undefined && arrival < windowStart
+        ? windowStart
+        : arrival;
+
+    if (invalidWindow) invalidWindows += 1;
+    if (!invalidWindow && windowEnd !== undefined && visitStart > windowEnd) {
+      lateStops += 1;
+      lateMinutes += visitStart - windowEnd;
+    }
+    cursor = visitStart + normalizedServiceMinutes(point.serviceMinutes);
+  }
+
+  return {
+    invalidWindows,
+    lateStops,
+    lateMinutes,
+    finishMinutes: cursor - departureMinutes,
+    totalDistanceKm: routeDistanceByIndex(route, matrix),
+  };
+}
+
+function compareScheduleScore(left: ScheduleScore, right: ScheduleScore) {
+  return compareNumberTuples(
+    [
+      left.invalidWindows,
+      left.lateStops,
+      left.lateMinutes,
+      left.finishMinutes,
+      left.totalDistanceKm,
+    ],
+    [
+      right.invalidWindows,
+      right.lateStops,
+      right.lateMinutes,
+      right.finishMinutes,
+      right.totalDistanceKm,
+    ]
+  );
+}
+
+function timeWindowGreedyIndices(
+  pointCount: number,
+  points: RoutePoint[],
+  matrix: DistanceMatrix,
+  options: OptimizeOptions
+) {
+  const startsWithFixedPoint = options.startsWithFixedPoint === true;
+  const route = startsWithFixedPoint ? [0] : [];
+  const unvisited = new Set(
+    Array.from(
+      { length: pointCount - (startsWithFixedPoint ? 1 : 0) },
+      (_, index) => index + (startsWithFixedPoint ? 1 : 0)
+    )
+  );
+  let cursor =
+    timeOfDayToMinutes(options.departureTime) ?? DEFAULT_DEPARTURE_MINUTES;
+
+  while (unvisited.size) {
+    const current = route.at(-1);
+    let selected = -1;
+    let selectedScore: number[] | null = null;
+
+    for (const candidate of Array.from(unvisited)) {
+      const point = points[candidate];
+      const arrival =
+        current === undefined
+          ? cursor
+          : cursor + travelMinutes(matrix[current][candidate]);
+      const windowStart = timeOfDayToMinutes(point.windowStart);
+      const windowEnd = timeOfDayToMinutes(point.windowEnd);
+      const invalidWindow =
+        windowStart !== undefined &&
+        windowEnd !== undefined &&
+        windowStart > windowEnd;
+      const visitStart =
+        windowStart !== undefined && arrival < windowStart
+          ? windowStart
+          : arrival;
+      const lateMinutes =
+        !invalidWindow && windowEnd !== undefined && visitStart > windowEnd
+          ? visitStart - windowEnd
+          : 0;
+      const candidateScore = [
+        invalidWindow ? 1 : 0,
+        lateMinutes > 0 ? 1 : 0,
+        lateMinutes,
+        windowEnd ?? Number.POSITIVE_INFINITY,
+        visitStart,
+        current === undefined ? 0 : matrix[current][candidate],
+        candidate,
+      ];
+
+      if (
+        selectedScore === null ||
+        compareNumberTuples(candidateScore, selectedScore) < 0
+      ) {
+        selected = candidate;
+        selectedScore = candidateScore;
+      }
+    }
+
+    const point = points[selected];
+    const arrival =
+      current === undefined
+        ? cursor
+        : cursor + travelMinutes(matrix[current][selected]);
+    const windowStart = timeOfDayToMinutes(point.windowStart);
+    const visitStart =
+      windowStart !== undefined && arrival < windowStart
+        ? windowStart
+        : arrival;
+    cursor = visitStart + normalizedServiceMinutes(point.serviceMinutes);
+    route.push(selected);
+    unvisited.delete(selected);
+  }
+
+  return route;
+}
+
 function improveWithTwoOpt(initialRoute: number[], matrix: DistanceMatrix) {
   if (initialRoute.length < 4) return initialRoute;
   const route = [...initialRoute];
@@ -190,10 +373,27 @@ function selectBestRoute(candidates: number[][], matrix: DistanceMatrix) {
   );
 }
 
+function selectBestScheduleRoute(
+  candidates: number[][],
+  points: RoutePoint[],
+  matrix: DistanceMatrix,
+  options: OptimizeOptions
+) {
+  return candidates.reduce((best, candidate) =>
+    compareScheduleScore(
+      scoreScheduleRoute(candidate, points, matrix, options),
+      scoreScheduleRoute(best, points, matrix, options)
+    ) < 0
+      ? candidate
+      : best
+  );
+}
+
 /**
  * Open-route TSP approximation with a fixed first point.
  * `fast` uses one nearest-neighbor candidate, while `quality` also evaluates
- * a cheapest-insertion candidate. Both candidates use matrix-backed best 2-opt.
+ * a cheapest-insertion candidate. `schedule` prioritizes valid time windows,
+ * then lateness, then route completion and distance.
  */
 export function optimizeRoute(
   points: RoutePoint[],
@@ -205,10 +405,20 @@ export function optimizeRoute(
   if (strategy === "quality") {
     candidates.push(cheapestInsertionIndices(points.length, matrix));
   }
-  const orderedIndices = selectBestRoute(
-    candidates.map(candidate => improveWithTwoOpt(candidate, matrix)),
-    matrix
+  if (strategy === "schedule") {
+    candidates.push(cheapestInsertionIndices(points.length, matrix));
+    candidates.push(
+      timeWindowGreedyIndices(points.length, points, matrix, options)
+    );
+  }
+  const optimizedCandidates = candidates.map(candidate =>
+    strategy === "schedule" ? candidate : improveWithTwoOpt(candidate, matrix)
   );
+  const orderedIndices =
+    strategy === "schedule" &&
+    points.some(point => point.windowStart || point.windowEnd)
+      ? selectBestScheduleRoute(optimizedCandidates, points, matrix, options)
+      : selectBestRoute(optimizedCandidates, matrix);
   const totalDistanceKm = routeDistanceByIndex(orderedIndices, matrix);
 
   return {

@@ -10,6 +10,7 @@ describe("trip calendar export", () => {
       {
         title: "현장, 점검",
         tripDate: "2026-08-25",
+        departureTime: "08:30",
         managerName: "홍길동",
         department: "건설과",
         returnToStart: true,
@@ -22,6 +23,9 @@ describe("trip calendar export", () => {
             name: "시청; 본관",
             address: "서울, 중구",
             note: "담당자 확인",
+            serviceMinutes: 35,
+            windowStart: "09:00",
+            windowEnd: "11:00",
           },
         ],
       },
@@ -33,6 +37,9 @@ describe("trip calendar export", () => {
     expect(ics).toContain("DTEND;VALUE=DATE:20260826");
     expect(ics).toContain("SUMMARY:현장\\, 점검");
     expect(ics).toContain("DESCRIPTION:담당자: 홍길동\\n부서: 건설과");
+    expect(ics).toContain("출발 시각: 08:30");
+    expect(ics).toContain("예정 09:18–09:53 · 체류 35분");
+    expect(ics).toContain("가능 09:00–11:00");
     expect(ics).toContain("시청\\; 본관");
     expect(ics).toContain("예상 이동 거리: 12.4km");
     expect(ics).toContain("END:VCALENDAR\r\n");
