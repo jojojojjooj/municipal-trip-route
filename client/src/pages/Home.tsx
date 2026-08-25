@@ -43,6 +43,10 @@ import {
   parseTripStopsCsv,
 } from "@shared/tripExport";
 import {
+  makeTripCalendar,
+  makeTripCalendarFileName,
+} from "@shared/tripCalendar";
+import {
   createTripResultReportDraft,
   parseTripResultReportDraft,
   type TripResultReportDraft,
@@ -83,6 +87,7 @@ import {
   ArrowDown,
   ArrowUp,
   CalendarDays,
+  CalendarPlus,
   Check,
   CheckCircle2,
   ClipboardCheck,
@@ -1746,6 +1751,7 @@ export default function Home() {
   );
   const [mapRetryRequestId, setMapRetryRequestId] = useState(0);
   const [csvImporting, setCsvImporting] = useState(false);
+  const [calendarDownloading, setCalendarDownloading] = useState(false);
   const reportRef = useRef<HTMLDivElement | null>(null);
   const fieldRecordPdfRef = useRef<HTMLDivElement | null>(null);
   const csvImportInputRef = useRef<HTMLInputElement | null>(null);
@@ -2730,6 +2736,50 @@ export default function Home() {
     link.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
     toast.success("목적지 운영 목록을 CSV로 내보냈습니다.");
+  };
+  const downloadCalendar = () => {
+    if (!destinations.length)
+      return toast.info("캘린더에 등록할 목적지를 먼저 추가해 주세요.");
+    if (!tripDate)
+      return toast.info("캘린더에 넣을 출장일을 먼저 입력해 주세요.");
+    setCalendarDownloading(true);
+    try {
+      const calendar = makeTripCalendar({
+        title,
+        tripDate,
+        managerName,
+        department,
+        returnToStart,
+        fixedStartName: fixedStart?.name,
+        routeDistanceKm: routeSummary.totalDistanceKm,
+        routeDurationMinutes: routeSummary.estimatedMinutes,
+        stops: destinations.map((destination, index) => ({
+          sequence: index + 1,
+          name: destination.name,
+          address: destination.address,
+          note: destination.note,
+        })),
+      });
+      const url = URL.createObjectURL(
+        new Blob([calendar], { type: "text/calendar;charset=utf-8" })
+      );
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = makeTripCalendarFileName(title, tripDate);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+      toast.success("출장 일정을 캘린더 파일로 내보냈습니다.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "캘린더 파일 생성에 실패했습니다."
+      );
+    } finally {
+      setCalendarDownloading(false);
+    }
   };
   const duplicateTrip = async (tripId: number) => {
     try {
@@ -4102,7 +4152,7 @@ export default function Home() {
                   )}
                   {pdfGenerating ? "PDF 생성 중" : "PDF 다운로드"}
                 </Button>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   <Button
                     onClick={() => window.print()}
                     variant="outline"
@@ -4123,6 +4173,19 @@ export default function Home() {
                     className="route-action-tertiary"
                   >
                     <FileSpreadsheet className="mr-2 h-4 w-4" /> CSV
+                  </Button>
+                  <Button
+                    onClick={downloadCalendar}
+                    disabled={!destinations.length || calendarDownloading}
+                    variant="outline"
+                    className="route-action-tertiary"
+                  >
+                    {calendarDownloading ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <CalendarPlus className="mr-2 h-4 w-4" />
+                    )}
+                    {calendarDownloading ? "생성 중" : "캘린더"}
                   </Button>
                 </div>
               </div>
@@ -4173,6 +4236,18 @@ export default function Home() {
                 </button>
                 <button type="button" onClick={downloadStopsCsv}>
                   <FileSpreadsheet className="h-3.5 w-3.5" /> CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={downloadCalendar}
+                  disabled={!destinations.length || calendarDownloading}
+                >
+                  {calendarDownloading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <CalendarPlus className="h-3.5 w-3.5" />
+                  )}{" "}
+                  캘린더
                 </button>
               </div>
             </div>
