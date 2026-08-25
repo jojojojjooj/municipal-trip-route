@@ -23,6 +23,9 @@ export type TripDraftDestination = {
   issueOwner?: string;
   issueDueAt?: string;
   issueResolvedAt?: string;
+  serviceMinutes?: number;
+  windowStart?: string;
+  windowEnd?: string;
 };
 
 export type TripDraftFixedStart = {
@@ -36,13 +39,18 @@ export type TripDraftFixedStart = {
 export type TripDraftPayload = {
   title: string;
   tripDate: string;
+  departureTime: string;
   managerName: string;
   department: string;
   fixedStart: TripDraftFixedStart | null;
   returnToStart: boolean;
   checklist: { preDeparture: boolean; onSite: boolean; wrapUp: boolean };
   destinations: TripDraftDestination[];
-  fieldRecordFilter: { takenAt: string; destinationId: string; descriptionQuery: string };
+  fieldRecordFilter: {
+    takenAt: string;
+    destinationId: string;
+    descriptionQuery: string;
+  };
   selectedFieldRecordKeys: string[];
   activeWorkspace: "planner" | "records" | "operations" | "report";
   workMode: "map" | "list";
@@ -66,6 +74,12 @@ function readNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function readTimeOfDay(value: unknown) {
+  return typeof value === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(value)
+    ? value
+    : undefined;
+}
+
 function readPhoto(value: unknown): TripDraftPhoto | null {
   if (!isRecord(value)) return null;
   const storageKey = readString(value.storageKey);
@@ -76,8 +90,12 @@ function readPhoto(value: unknown): TripDraftPhoto | null {
     storageKey,
     url,
     fileName,
-    ...(readString(value.takenAt) ? { takenAt: readString(value.takenAt) } : {}),
-    ...(readString(value.description) ? { description: readString(value.description) } : {}),
+    ...(readString(value.takenAt)
+      ? { takenAt: readString(value.takenAt) }
+      : {}),
+    ...(readString(value.description)
+      ? { description: readString(value.description) }
+      : {}),
   };
 }
 
@@ -88,9 +106,24 @@ function readDestination(value: unknown): TripDraftDestination | null {
   const address = readString(value.address);
   const latitude = readNumber(value.latitude);
   const longitude = readNumber(value.longitude);
-  if (!id || !name || !address || latitude === null || longitude === null) return null;
-  const photos = Array.isArray(value.photos) ? value.photos.map(readPhoto).filter((photo): photo is TripDraftPhoto => Boolean(photo)).slice(0, 3) : [];
-  const executionStatus = ["planned", "in_progress", "completed", "issue"].includes(readString(value.executionStatus)) ? readString(value.executionStatus) as TripDraftDestination["executionStatus"] : "planned";
+  if (!id || !name || !address || latitude === null || longitude === null)
+    return null;
+  const photos = Array.isArray(value.photos)
+    ? value.photos
+        .map(readPhoto)
+        .filter((photo): photo is TripDraftPhoto => Boolean(photo))
+        .slice(0, 3)
+    : [];
+  const executionStatus = [
+    "planned",
+    "in_progress",
+    "completed",
+    "issue",
+  ].includes(readString(value.executionStatus))
+    ? (readString(
+        value.executionStatus
+      ) as TripDraftDestination["executionStatus"])
+    : "planned";
   return {
     id,
     name,
@@ -100,51 +133,118 @@ function readDestination(value: unknown): TripDraftDestination | null {
     note: readString(value.note),
     photos,
     executionStatus,
-    ...(readString(value.completedAt) ? { completedAt: readString(value.completedAt) } : {}),
-    ...(readString(value.issueNote) ? { issueNote: readString(value.issueNote) } : {}),
-    ...(readString(value.issueOwner) ? { issueOwner: readString(value.issueOwner) } : {}),
-    ...(readString(value.issueDueAt) ? { issueDueAt: readString(value.issueDueAt) } : {}),
-    ...(readString(value.issueResolvedAt) ? { issueResolvedAt: readString(value.issueResolvedAt) } : {}),
+    ...(readString(value.completedAt)
+      ? { completedAt: readString(value.completedAt) }
+      : {}),
+    ...(readString(value.issueNote)
+      ? { issueNote: readString(value.issueNote) }
+      : {}),
+    ...(readString(value.issueOwner)
+      ? { issueOwner: readString(value.issueOwner) }
+      : {}),
+    ...(readString(value.issueDueAt)
+      ? { issueDueAt: readString(value.issueDueAt) }
+      : {}),
+    ...(readString(value.issueResolvedAt)
+      ? { issueResolvedAt: readString(value.issueResolvedAt) }
+      : {}),
+    ...(readNumber(value.serviceMinutes) !== null
+      ? {
+          serviceMinutes: Math.min(
+            Math.max(Math.round(readNumber(value.serviceMinutes) ?? 20), 0),
+            480
+          ),
+        }
+      : {}),
+    ...(readTimeOfDay(value.windowStart)
+      ? { windowStart: readTimeOfDay(value.windowStart) }
+      : {}),
+    ...(readTimeOfDay(value.windowEnd)
+      ? { windowEnd: readTimeOfDay(value.windowEnd) }
+      : {}),
   };
 }
 
 function readFixedStart(value: unknown): TripDraftFixedStart | null {
   const destination = readDestination(value);
-  return destination ? { id: destination.id, name: destination.name, address: destination.address, latitude: destination.latitude, longitude: destination.longitude } : null;
+  return destination
+    ? {
+        id: destination.id,
+        name: destination.name,
+        address: destination.address,
+        latitude: destination.latitude,
+        longitude: destination.longitude,
+      }
+    : null;
 }
 
-export function createTripDraftEnvelope(payload: TripDraftPayload, updatedAt = Date.now()): TripDraftEnvelope {
+export function createTripDraftEnvelope(
+  payload: TripDraftPayload,
+  updatedAt = Date.now()
+): TripDraftEnvelope {
   return { version: 1, updatedAt, payload };
 }
 
-export function parseTripDraft(value: string | null | undefined): TripDraftEnvelope | null {
+export function parseTripDraft(
+  value: string | null | undefined
+): TripDraftEnvelope | null {
   if (!value) return null;
   try {
     const parsed: unknown = JSON.parse(value);
-    if (!isRecord(parsed) || parsed.version !== 1 || !isRecord(parsed.payload)) return null;
+    if (!isRecord(parsed) || parsed.version !== 1 || !isRecord(parsed.payload))
+      return null;
     const updatedAt = readNumber(parsed.updatedAt);
     if (updatedAt === null) return null;
     const payload = parsed.payload;
-    const destinations = Array.isArray(payload.destinations) ? payload.destinations.map(readDestination).filter((destination): destination is TripDraftDestination => Boolean(destination)).slice(0, 30) : [];
+    const destinations = Array.isArray(payload.destinations)
+      ? payload.destinations
+          .map(readDestination)
+          .filter((destination): destination is TripDraftDestination =>
+            Boolean(destination)
+          )
+          .slice(0, 30)
+      : [];
     return {
       version: 1,
       updatedAt,
       payload: {
         title: readString(payload.title),
         tripDate: readString(payload.tripDate),
+        departureTime: readTimeOfDay(payload.departureTime) ?? "09:00",
         managerName: readString(payload.managerName),
         department: readString(payload.department),
         fixedStart: readFixedStart(payload.fixedStart),
         returnToStart: Boolean(payload.returnToStart),
-        checklist: isRecord(payload.checklist) ? { preDeparture: Boolean(payload.checklist.preDeparture), onSite: Boolean(payload.checklist.onSite), wrapUp: Boolean(payload.checklist.wrapUp) } : { preDeparture: false, onSite: false, wrapUp: false },
+        checklist: isRecord(payload.checklist)
+          ? {
+              preDeparture: Boolean(payload.checklist.preDeparture),
+              onSite: Boolean(payload.checklist.onSite),
+              wrapUp: Boolean(payload.checklist.wrapUp),
+            }
+          : { preDeparture: false, onSite: false, wrapUp: false },
         destinations,
-        fieldRecordFilter: isRecord(payload.fieldRecordFilter) ? {
-          takenAt: readString(payload.fieldRecordFilter.takenAt),
-          destinationId: readString(payload.fieldRecordFilter.destinationId),
-          descriptionQuery: readString(payload.fieldRecordFilter.descriptionQuery),
-        } : { takenAt: "", destinationId: "", descriptionQuery: "" },
-        selectedFieldRecordKeys: Array.isArray(payload.selectedFieldRecordKeys) ? payload.selectedFieldRecordKeys.filter((key): key is string => typeof key === "string").slice(0, 90) : [],
-        activeWorkspace: payload.activeWorkspace === "records" || payload.activeWorkspace === "operations" || payload.activeWorkspace === "report" ? payload.activeWorkspace : "planner",
+        fieldRecordFilter: isRecord(payload.fieldRecordFilter)
+          ? {
+              takenAt: readString(payload.fieldRecordFilter.takenAt),
+              destinationId: readString(
+                payload.fieldRecordFilter.destinationId
+              ),
+              descriptionQuery: readString(
+                payload.fieldRecordFilter.descriptionQuery
+              ),
+            }
+          : { takenAt: "", destinationId: "", descriptionQuery: "" },
+        selectedFieldRecordKeys: Array.isArray(payload.selectedFieldRecordKeys)
+          ? payload.selectedFieldRecordKeys
+              .filter((key): key is string => typeof key === "string")
+              .slice(0, 90)
+          : [],
+        activeWorkspace:
+          payload.activeWorkspace === "records" ||
+          payload.activeWorkspace === "operations" ||
+          payload.activeWorkspace === "report"
+            ? payload.activeWorkspace
+            : "planner",
         workMode: payload.workMode === "list" ? "list" : "map",
       },
     };
@@ -155,19 +255,25 @@ export function parseTripDraft(value: string | null | undefined): TripDraftEnvel
 
 export function hasTripDraftContent(payload: TripDraftPayload) {
   return Boolean(
-    payload.title.trim()
-    || payload.managerName.trim()
-    || payload.fixedStart
-    || payload.destinations.length
-    || payload.fieldRecordFilter.takenAt
-    || payload.fieldRecordFilter.destinationId
-    || payload.fieldRecordFilter.descriptionQuery.trim()
-    || payload.selectedFieldRecordKeys.length,
+    payload.title.trim() ||
+      payload.managerName.trim() ||
+      payload.fixedStart ||
+      payload.destinations.length ||
+      payload.fieldRecordFilter.takenAt ||
+      payload.fieldRecordFilter.destinationId ||
+      payload.fieldRecordFilter.descriptionQuery.trim() ||
+      payload.selectedFieldRecordKeys.length
   );
 }
 
-export function pickLatestTripDraft(...drafts: Array<TripDraftEnvelope | null | undefined>) {
-  return drafts.filter((draft): draft is TripDraftEnvelope => Boolean(draft)).sort((left, right) => right.updatedAt - left.updatedAt)[0] ?? null;
+export function pickLatestTripDraft(
+  ...drafts: Array<TripDraftEnvelope | null | undefined>
+) {
+  return (
+    drafts
+      .filter((draft): draft is TripDraftEnvelope => Boolean(draft))
+      .sort((left, right) => right.updatedAt - left.updatedAt)[0] ?? null
+  );
 }
 
 export function tripDraftFingerprint(payload: TripDraftPayload) {

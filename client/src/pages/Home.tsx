@@ -73,6 +73,7 @@ import {
   type ExecutionStatus,
   type TripChecklist,
 } from "@shared/tripOperations";
+import { buildConstrainedVisitSchedule } from "@shared/tripSchedule";
 import {
   optimizeRouteFromFixedStart,
   type FixedStart,
@@ -140,6 +141,9 @@ type Destination = MapDestination & {
   issueOwner?: string;
   issueDueAt?: string;
   issueResolvedAt?: string;
+  serviceMinutes?: number;
+  windowStart?: string;
+  windowEnd?: string;
 };
 type FixedStartLocation = FixedStart;
 type FieldRecord = DestinationPhoto & {
@@ -1670,6 +1674,7 @@ export default function Home() {
     isDesignPreview ? "현장 운영 고도화 검증" : ""
   );
   const [tripDate, setTripDate] = useState(today);
+  const [departureTime, setDepartureTime] = useState("09:00");
   const [managerName, setManagerName] = useState(() =>
     isDesignPreview ? "검증 담당" : ""
   );
@@ -1885,15 +1890,22 @@ export default function Home() {
       ].some(value => value.toLocaleLowerCase("ko-KR").includes(query))
     );
   }, [archiveQuery, plans.data]);
-  const visitSchedule = useMemo(
+  const constrainedSchedule = useMemo(
     () =>
-      buildVisitSchedule(
+      buildConstrainedVisitSchedule({
         tripDate,
-        routeSummary.estimatedMinutes,
-        destinations.length
-      ),
-    [destinations.length, routeSummary.estimatedMinutes, tripDate]
+        departureTime,
+        routeDurationMinutes: routeSummary.estimatedMinutes,
+        stops: destinations.map(destination => ({
+          id: destination.id,
+          serviceMinutes: destination.serviceMinutes,
+          windowStart: destination.windowStart,
+          windowEnd: destination.windowEnd,
+        })),
+      }),
+    [departureTime, destinations, routeSummary.estimatedMinutes, tripDate]
   );
+  const visitSchedule = constrainedSchedule.stops;
   const pdfRoutePoints = useMemo(
     () =>
       makeRoutePoints(
@@ -1943,6 +1955,7 @@ export default function Home() {
     () => ({
       title,
       tripDate,
+      departureTime,
       managerName,
       department,
       fixedStart: fixedStart
@@ -1978,6 +1991,9 @@ export default function Home() {
         issueOwner: destination.issueOwner,
         issueDueAt: destination.issueDueAt,
         issueResolvedAt: destination.issueResolvedAt,
+        serviceMinutes: destination.serviceMinutes,
+        windowStart: destination.windowStart,
+        windowEnd: destination.windowEnd,
       })),
       fieldRecordFilter: {
         takenAt: fieldRecordFilter.takenAt,
@@ -1992,6 +2008,7 @@ export default function Home() {
       activeWorkspace,
       checklist,
       department,
+      departureTime,
       destinations,
       fieldRecordFilter,
       fixedStart,
@@ -2019,6 +2036,7 @@ export default function Home() {
     const payload = draft.payload;
     setTitle(payload.title);
     setTripDate(payload.tripDate || today);
+    setDepartureTime(payload.departureTime || "09:00");
     setManagerName(payload.managerName);
     setDepartment(payload.department);
     setFixedStart(payload.fixedStart);
@@ -2090,6 +2108,7 @@ export default function Home() {
     if (!selectedPlan.data) return;
     setTitle(selectedPlan.data.title);
     setTripDate(toIsoDate(selectedPlan.data.tripDate));
+    setDepartureTime(selectedPlan.data.departureTime ?? "09:00");
     setManagerName(selectedPlan.data.managerName);
     setDepartment(selectedPlan.data.department ?? "");
     setDestinations(
@@ -2110,6 +2129,9 @@ export default function Home() {
         issueResolvedAt: stop.issueResolvedAt
           ? new Date(stop.issueResolvedAt).toISOString()
           : undefined,
+        serviceMinutes: stop.serviceMinutes ?? 20,
+        windowStart: stop.windowStart ?? undefined,
+        windowEnd: stop.windowEnd ?? undefined,
         photos:
           stop.photos?.map(photo => ({
             storageKey: photo.storageKey,
@@ -2414,6 +2436,7 @@ export default function Home() {
     const draft = createNewTripDraft(today);
     setTitle(draft.title);
     setTripDate(draft.tripDate);
+    setDepartureTime("09:00");
     setManagerName(draft.managerName);
     setDepartment("");
     setFixedStartQuery(draft.fixedStartQuery);
@@ -2675,6 +2698,7 @@ export default function Home() {
       returnToStart,
       routeDistanceKm: routeSummary.totalDistanceKm,
       routeDurationMinutes: routeSummary.estimatedMinutes,
+      departureTime,
       checklist,
       stops: destinations.map((destination, index) => ({
         ...destination,
@@ -3488,7 +3512,7 @@ export default function Home() {
                     className="editorial-input"
                   />
                 </label>
-                <div className="grid gap-3 sm:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-4">
                   <label className="editorial-label">
                     출장일
                     <Input
@@ -3513,6 +3537,15 @@ export default function Home() {
                       value={department}
                       onChange={event => setDepartment(event.target.value)}
                       placeholder="예: 건설과"
+                      className="editorial-input"
+                    />
+                  </label>
+                  <label className="editorial-label">
+                    출발 시각
+                    <Input
+                      type="time"
+                      value={departureTime}
+                      onChange={event => setDepartureTime(event.target.value)}
                       className="editorial-input"
                     />
                   </label>
@@ -3776,6 +3809,87 @@ export default function Home() {
                             </button>
                           </div>
                         </div>
+                        <div className="mt-3 grid gap-2 border-t border-black/10 pt-3 sm:grid-cols-3">
+                          <label className="text-[10px] font-semibold tracking-[0.08em] text-stone-500">
+                            현장 체류(분)
+                            <Input
+                              type="number"
+                              min={0}
+                              max={480}
+                              value={destination.serviceMinutes ?? 20}
+                              onChange={event =>
+                                updateDestinations(
+                                  destinations.map(item =>
+                                    item.id === destination.id
+                                      ? {
+                                          ...item,
+                                          serviceMinutes: Math.min(
+                                            Math.max(
+                                              Number(event.target.value) || 0,
+                                              0
+                                            ),
+                                            480
+                                          ),
+                                        }
+                                      : item
+                                  )
+                                )
+                              }
+                              className="mt-1 h-8 text-xs"
+                            />
+                          </label>
+                          <label className="text-[10px] font-semibold tracking-[0.08em] text-stone-500">
+                            방문 가능 시작
+                            <Input
+                              type="time"
+                              value={destination.windowStart ?? ""}
+                              onChange={event =>
+                                updateDestinations(
+                                  destinations.map(item =>
+                                    item.id === destination.id
+                                      ? {
+                                          ...item,
+                                          windowStart:
+                                            event.target.value || undefined,
+                                        }
+                                      : item
+                                  )
+                                )
+                              }
+                              className="mt-1 h-8 text-xs"
+                            />
+                          </label>
+                          <label className="text-[10px] font-semibold tracking-[0.08em] text-stone-500">
+                            방문 가능 종료
+                            <Input
+                              type="time"
+                              value={destination.windowEnd ?? ""}
+                              onChange={event =>
+                                updateDestinations(
+                                  destinations.map(item =>
+                                    item.id === destination.id
+                                      ? {
+                                          ...item,
+                                          windowEnd:
+                                            event.target.value || undefined,
+                                        }
+                                      : item
+                                  )
+                                )
+                              }
+                              className="mt-1 h-8 text-xs"
+                            />
+                          </label>
+                        </div>
+                        {visitSchedule[index] &&
+                        visitSchedule[index].status !== "on_time" ? (
+                          <p className="mt-2 flex items-center gap-1 text-xs font-semibold text-[#b4533d]">
+                            <AlertTriangle className="h-3.5 w-3.5" />
+                            {visitSchedule[index].status === "late"
+                              ? "예상 방문 시각이 허용 종료 시각을 지납니다."
+                              : "방문 가능 시작·종료 시각을 확인해 주세요."}
+                          </p>
+                        ) : null}
                         <div className="destination-execution">
                           <div className="destination-execution-head">
                             <span>실행 상태</span>
@@ -4152,6 +4266,60 @@ export default function Home() {
                       : "목적지를 2곳 이상 등록하면 최적 동선 계산을 시작합니다."}
                   </small>
                 </span>
+              </div>
+              <div className="mt-4 border border-black/12 bg-[#fffdf7] p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="section-label">Visit schedule</p>
+                    <p className="mt-1 text-sm font-semibold">시간 제약 검토</p>
+                  </div>
+                  <span
+                    className={
+                      constrainedSchedule.violations.length
+                        ? "route-mode-chip border-[#c4503d] text-[#b4533d]"
+                        : "route-mode-chip"
+                    }
+                  >
+                    {constrainedSchedule.violations.length
+                      ? `위반 ${constrainedSchedule.violations.length}건`
+                      : "적합"}
+                  </span>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-stone-600">
+                  {departureTime} 출발 · 현장 체류{" "}
+                  {constrainedSchedule.totalServiceMinutes}분 · 대기{" "}
+                  {constrainedSchedule.totalWaitMinutes}분
+                </p>
+                <div className="mt-3 space-y-2">
+                  {visitSchedule.slice(0, 5).map((visit, index) => (
+                    <div
+                      key={visit.id}
+                      className="flex items-center justify-between gap-3 text-xs"
+                    >
+                      <span className="truncate">
+                        {String(index + 1).padStart(2, "0")} ·{" "}
+                        {destinations[index]?.name}
+                      </span>
+                      <span
+                        className={
+                          visit.status === "on_time"
+                            ? "text-stone-500"
+                            : "font-semibold text-[#b4533d]"
+                        }
+                      >
+                        {new Intl.DateTimeFormat("ko-KR", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        }).format(visit.visitStart)}
+                        –
+                        {new Intl.DateTimeFormat("ko-KR", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        }).format(visit.visitEnd)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
               <div
                 className={
