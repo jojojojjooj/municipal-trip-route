@@ -29,7 +29,7 @@ pnpm test
 pnpm dev
 ```
 
-실행 전에는 데이터베이스, 세션, 카카오맵, OAuth, 사진 저장소의 환경변수를 별도 설정해야 합니다. 실제 비밀값은 커밋하지 마십시오. 상세한 외부 호스팅·도메인 연결 절차는 [EXTERNAL_DEPLOYMENT.md](./EXTERNAL_DEPLOYMENT.md)를 참고하십시오.
+실행 전에는 데이터베이스, 세션, 카카오맵, OAuth, 사진 저장소의 환경변수를 별도 설정해야 합니다. 실제 비밀값은 커밋하지 마십시오. 한 명이 로컬에서 사용하는 경우에는 [PERSONAL_API_SETUP.md](./PERSONAL_API_SETUP.md)의 개인용 API 설정을 따르고, 외부 호스팅·도메인 연결은 [EXTERNAL_DEPLOYMENT.md](./EXTERNAL_DEPLOYMENT.md)를 참고하십시오.
 
 ## 환경 설정 요약
 
@@ -38,8 +38,9 @@ pnpm dev
 | 데이터베이스          | `DATABASE_URL`                                             |
 | 세션 서명             | `JWT_SECRET`                                               |
 | 카카오 지도·주소 검색 | `VITE_KAKAO_MAP_APP_KEY`, `KAKAO_REST_API_KEY`             |
+| 개인 로컬 인증        | `LOCAL_PERSONAL_MODE`, `LOCAL_PERSONAL_OPEN_ID`            |
 | OAuth                 | `VITE_APP_ID`, `OAUTH_SERVER_URL`, `VITE_OAUTH_PORTAL_URL` |
-| 사진 저장소           | `BUILT_IN_FORGE_API_URL`, `BUILT_IN_FORGE_API_KEY`         |
+| 사진·보고서 저장소    | `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` 또는 관리형 Forge 설정 |
 
 `VITE_` 접두사 변수는 브라우저 번들에 노출될 수 있습니다. 데이터베이스 연결 문자열, REST API 키, 세션 비밀값 등 서버 전용 정보에는 이 접두사를 사용하지 마십시오.
 
@@ -78,7 +79,7 @@ pnpm dev
 
 ## 외부 S3 호환 저장소 전환
 
-현재 사진 업로드는 관리형 사전 서명 URL 연동을 사용합니다. AWS S3, Cloudflare R2, MinIO 등 외부 S3 호환 저장소로 운영하려면 환경변수만 추가하는 방식이 아니라 저장소 어댑터를 교체해야 합니다. 업로드 키 생성, 권한 확인 및 URL 반환 규칙을 보존하면 사진·PDF·결과 보고서 기능을 유지할 수 있습니다.
+사진·PDF·HWPX 파일은 관리형 사전 서명 URL을 기본으로 사용하며, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`를 모두 설정하면 AWS S3, Cloudflare R2, MinIO 등의 S3 호환 저장소로 자동 전환합니다. S3 설정이 우선하며, 내려받기는 짧은 수명의 사전 서명 GET URL을 사용합니다.
 
 | 구성 항목      | 권장 값                                                                             | 주의사항                                                                |
 | -------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
@@ -87,11 +88,13 @@ pnpm dev
 | 객체 키        | `trips/{tripId}/...` 같은 사용자·출장 단위 접두사                                   | 사용자 요청으로 전달된 키를 그대로 사용하지 않고 서버에서 정규화합니다. |
 | 다운로드       | 짧은 만료 시간의 사전 서명 GET URL                                                  | 권한 확인 후 발급하고, URL을 데이터베이스에 영구 저장하지 않습니다.     |
 
-전환 시 `server/storage.ts`의 `storagePut`, `storageGet`, `storageGetSignedUrl`을 S3 SDK 기반 구현으로 바꾸고, `server/_core/storageProxy.ts`는 인증·권한 확인 뒤 사전 서명 GET URL로 307 리디렉션하는 현재 계약을 유지하십시오. 업로드에는 최소 권한의 `PutObject`, 다운로드에는 `GetObject`만 부여하고, 버킷 전체 삭제·목록 권한은 부여하지 않는 구성을 권장합니다.
+`server/storage.ts`는 이미 `storagePut`, `storageGet`, `storageGetSignedUrl`에서 S3 SDK 기반 폴백을 제공합니다. 업로드에는 최소 권한의 `PutObject`, 다운로드에는 `GetObject`만 부여하고, 버킷 전체 삭제·목록 권한은 부여하지 않는 구성을 권장합니다.
 
 ## 외부 OAuth 제공자 전환
 
 현재 로그인은 관리형 OAuth SDK를 사용합니다. Auth0, Keycloak, Google OAuth 또는 조직의 OpenID Connect 제공자로 바꾸려면 프런트엔드 로그인 시작 함수, 서버 콜백 처리, 사용자 식별자 매핑을 함께 교체해야 합니다. 단순히 새 OAuth 환경변수만 설정하면 기존 인증 흐름이 전환되지는 않습니다.
+
+개인 컴퓨터에서 개발할 때는 `LOCAL_PERSONAL_MODE=true`을 사용하면 단일 관리자 계정으로 자동 진입할 수 있습니다. 이 모드는 `NODE_ENV=production`이면 동작하지 않으므로, 공개 배포 인증을 대체하지 않습니다.
 
 1. OAuth 제공자에 `https://<최종-도메인>/api/oauth/callback`을 정확한 리디렉션 URI로 등록합니다.
 2. 서버 전용 비밀 설정에 `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`, `OAUTH_ISSUER_URL`, `JWT_SECRET`을 등록합니다. 클라이언트 시크릿과 세션 서명 키는 절대 `VITE_` 변수로 노출하지 않습니다.

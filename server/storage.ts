@@ -1,8 +1,72 @@
-// Preconfigured storage helpers for Manus WebDev templates
-// Uploads via Forge Server presigned URL to S3 (PUT direct).
-// Downloads return /manus-storage/{key} paths served via 307 redirect.
-
+import {
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { ENV } from "./_core/env";
+
+type StorageBackend = "s3" | "forge" | "missing";
+
+type S3Config = {
+  bucket: string;
+  region: string;
+  endpoint?: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  forcePathStyle: boolean;
+  publicBaseUrl?: string;
+};
+
+let s3Client: S3Client | null = null;
+let s3ClientFingerprint = "";
+
+export function resolveStorageBackend(
+  env: NodeJS.ProcessEnv = process.env
+): StorageBackend {
+  if (env.S3_BUCKET && env.S3_ACCESS_KEY_ID && env.S3_SECRET_ACCESS_KEY) {
+    return "s3";
+  }
+  if (env.BUILT_IN_FORGE_API_URL && env.BUILT_IN_FORGE_API_KEY) {
+    return "forge";
+  }
+  return "missing";
+}
+
+function getS3Config(env: NodeJS.ProcessEnv = process.env): S3Config | null {
+  if (resolveStorageBackend(env) !== "s3") return null;
+  return {
+    bucket: env.S3_BUCKET as string,
+    region: env.S3_REGION || "auto",
+    endpoint: env.S3_ENDPOINT?.replace(/\/+$/, "") || undefined,
+    accessKeyId: env.S3_ACCESS_KEY_ID as string,
+    secretAccessKey: env.S3_SECRET_ACCESS_KEY as string,
+    forcePathStyle: env.S3_FORCE_PATH_STYLE === "true",
+    publicBaseUrl: env.S3_PUBLIC_BASE_URL?.replace(/\/+$/, "") || undefined,
+  };
+}
+
+function getS3Client(config: S3Config): S3Client {
+  const fingerprint = JSON.stringify({
+    region: config.region,
+    endpoint: config.endpoint,
+    accessKeyId: config.accessKeyId,
+    forcePathStyle: config.forcePathStyle,
+  });
+  if (!s3Client || s3ClientFingerprint !== fingerprint) {
+    s3Client = new S3Client({
+      region: config.region,
+      endpoint: config.endpoint,
+      forcePathStyle: config.forcePathStyle,
+      credentials: {
+        accessKeyId: config.accessKeyId,
+        secretAccessKey: config.secretAccessKey,
+      },
+    });
+    s3ClientFingerprint = fingerprint;
+  }
+  return s3Client;
+}
 
 function getForgeConfig() {
   const forgeUrl = ENV.forgeApiUrl;
@@ -10,7 +74,7 @@ function getForgeConfig() {
 
   if (!forgeUrl || !forgeKey) {
     throw new Error(
-      "Storage config missing: set BUILT_IN_FORGE_API_URL and BUILT_IN_FORGE_API_KEY",
+      "Storage config missing: set BUILT_IN_FORGE_API_URL and BUILT_IN_FORGE_API_KEY"
     );
   }
 
@@ -31,10 +95,28 @@ function appendHashSuffix(relKey: string): string {
 export async function storagePut(
   relKey: string,
   data: Buffer | Uint8Array | string,
-  contentType = "application/octet-stream",
+  contentType = "application/octet-stream"
 ): Promise<{ key: string; url: string }> {
-  const { forgeUrl, forgeKey } = getForgeConfig();
   const key = appendHashSuffix(normalizeKey(relKey));
+  const s3Config = getS3Config();
+  if (s3Config) {
+    await getS3Client(s3Config).send(
+      new PutObjectCommand({
+        Bucket: s3Config.bucket,
+        Key: key,
+        Body: data,
+        ContentType: contentType,
+      })
+    );
+    return {
+      key,
+      url: s3Config.publicBaseUrl
+        ? `${s3Config.publicBaseUrl}/${key}`
+        : `s3://${s3Config.bucket}/${key}`,
+    };
+  }
+
+  const { forgeUrl, forgeKey } = getForgeConfig();
 
   // 1. Get presigned PUT URL from Forge
   const presignUrl = new URL("v1/storage/presign/put", forgeUrl + "/");
@@ -71,14 +153,40 @@ export async function storagePut(
   return { key, url: `/manus-storage/${key}` };
 }
 
-export async function storageGet(relKey: string): Promise<{ key: string; url: string }> {
+export async function storageGet(
+  relKey: string
+): Promise<{ key: string; url: string }> {
   const key = normalizeKey(relKey);
+  const s3Config = getS3Config();
+  if (s3Config) {
+    return {
+      key,
+      url: s3Config.publicBaseUrl
+        ? `${s3Config.publicBaseUrl}/${key}`
+        : `s3://${s3Config.bucket}/${key}`,
+    };
+  }
   return { key, url: `/manus-storage/${key}` };
 }
 
 export async function storageGetSignedUrl(relKey: string): Promise<string> {
-  const { forgeUrl, forgeKey } = getForgeConfig();
   const key = normalizeKey(relKey);
+  const s3Config = getS3Config();
+  if (s3Config) {
+    const configuredSeconds = Number(
+      process.env.S3_SIGNED_URL_EXPIRES_SECONDS ?? "900"
+    );
+    const expiresIn = Number.isFinite(configuredSeconds)
+      ? Math.min(Math.max(Math.floor(configuredSeconds), 60), 3600)
+      : 900;
+    return getSignedUrl(
+      getS3Client(s3Config),
+      new GetObjectCommand({ Bucket: s3Config.bucket, Key: key }),
+      { expiresIn }
+    );
+  }
+
+  const { forgeUrl, forgeKey } = getForgeConfig();
 
   const getUrl = new URL("v1/storage/presign/get", forgeUrl + "/");
   getUrl.searchParams.set("path", key);
