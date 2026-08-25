@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { optimizeRoute, routeDistanceKm, type RoutePoint } from "./tripOptimizer";
+import {
+  optimizeRoute,
+  routeDistanceKm,
+  type RoutePoint,
+} from "./tripOptimizer";
 
 const points: RoutePoint[] = [
   { id: "origin", latitude: 35.5692, longitude: 126.8556 },
@@ -14,8 +18,25 @@ describe("optimizeRoute", () => {
     const optimized = optimizeRoute(points);
 
     expect(optimized.orderedIds[0]).toBe("origin");
-    expect(new Set(optimized.orderedIds)).toEqual(new Set(points.map(point => point.id)));
+    expect(new Set(optimized.orderedIds)).toEqual(
+      new Set(points.map(point => point.id))
+    );
     expect(optimized.totalDistanceKm).toBeLessThanOrEqual(baselineDistance);
     expect(optimized.estimatedMinutes).toBeGreaterThanOrEqual(0);
+    expect(optimized.optimizationStrategy).toBe("quality");
+  });
+
+  it("never makes quality mode longer than fast mode", () => {
+    const fast = optimizeRoute(points, { strategy: "fast" });
+    const quality = optimizeRoute(points, { strategy: "quality" });
+
+    expect(quality.totalDistanceKm).toBeLessThanOrEqual(
+      fast.totalDistanceKm + 0.000001
+    );
+    expect(quality.orderedIds).toHaveLength(points.length);
+    expect(new Set(quality.orderedIds)).toEqual(
+      new Set(points.map(point => point.id))
+    );
+    expect(fast.optimizationStrategy).toBe("fast");
   });
 });

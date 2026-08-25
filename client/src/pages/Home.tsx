@@ -77,6 +77,7 @@ import {
   optimizeRouteFromFixedStart,
   type FixedStart,
 } from "@shared/fixedStartRoute";
+import type { OptimizationStrategy } from "@shared/tripOptimizer";
 import {
   makeFieldRecordPdfFileName,
   makeTripPdfFileName,
@@ -1683,6 +1684,8 @@ export default function Home() {
     isFixedStartPreview || isRoundTripPreview ? fixedStartPreview : null
   );
   const [returnToStart, setReturnToStart] = useState(() => isRoundTripPreview);
+  const [optimizationStrategy, setOptimizationStrategy] =
+    useState<OptimizationStrategy>("quality");
   const [addressQuery, setAddressQuery] = useState("");
   const [destinations, setDestinations] = useState<Destination[]>(() =>
     isDesignPreview ? designPreviewStops : []
@@ -1797,9 +1800,10 @@ export default function Home() {
           latitude: destination.latitude,
           longitude: destination.longitude,
         })),
-        returnToStart
+        returnToStart,
+        { strategy: optimizationStrategy }
       ),
-    [destinations, fixedStart, returnToStart]
+    [destinations, fixedStart, optimizationStrategy, returnToStart]
   );
   const operationSummary = useMemo(
     () => getTripOperationSummary(destinations),
@@ -4066,20 +4070,38 @@ export default function Home() {
                   <p className="section-label">03 / Route Summary</p>
                   <p>현장 운영 경로</p>
                 </div>
-                <span
-                  className={
-                    returnToStart
-                      ? "route-mode-chip route-mode-chip-round"
-                      : "route-mode-chip"
-                  }
-                >
-                  {returnToStart ? (
-                    <Repeat2 className="h-3.5 w-3.5" />
-                  ) : (
-                    <Navigation className="h-3.5 w-3.5" />
-                  )}
-                  {returnToStart ? "왕복" : "편도"}
-                </span>
+                <div className="flex items-center gap-2">
+                  <label htmlFor="optimization-strategy" className="sr-only">
+                    경로 최적화 모드
+                  </label>
+                  <select
+                    id="optimization-strategy"
+                    value={optimizationStrategy}
+                    onChange={event =>
+                      setOptimizationStrategy(
+                        event.target.value as OptimizationStrategy
+                      )
+                    }
+                    className="h-8 border border-black/15 bg-[#fffdf7] px-2 text-[10px] font-bold text-stone-600 outline-none focus:border-[#c4503d]"
+                  >
+                    <option value="quality">정밀 경로</option>
+                    <option value="fast">빠른 경로</option>
+                  </select>
+                  <span
+                    className={
+                      returnToStart
+                        ? "route-mode-chip route-mode-chip-round"
+                        : "route-mode-chip"
+                    }
+                  >
+                    {returnToStart ? (
+                      <Repeat2 className="h-3.5 w-3.5" />
+                    ) : (
+                      <Navigation className="h-3.5 w-3.5" />
+                    )}
+                    {returnToStart ? "왕복" : "편도"}
+                  </span>
+                </div>
               </div>
               <div className="route-summary-grid mt-5">
                 <div className="route-card route-card-primary">
@@ -4124,7 +4146,9 @@ export default function Home() {
                     {tripReadiness.canOptimize
                       ? returnToStart
                         ? "복귀 구간까지 포함한 왕복 동선을 준비했습니다."
-                        : "Nearest Neighbor + 2-opt 기준으로 편도 방문 순서를 계산합니다."
+                        : optimizationStrategy === "quality"
+                          ? "거리 행렬 + 다중 후보 + best 2-opt로 정밀 방문 순서를 계산합니다."
+                          : "거리 행렬 + Nearest Neighbor + best 2-opt로 빠르게 계산합니다."
                       : "목적지를 2곳 이상 등록하면 최적 동선 계산을 시작합니다."}
                   </small>
                 </span>
