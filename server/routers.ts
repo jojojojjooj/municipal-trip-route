@@ -4,6 +4,7 @@ import { z } from "zod";
 import { COOKIE_NAME } from "../shared/const";
 import { allowedTripPhotoMimeTypes, makeTripPhotoDataUrl } from "../shared/tripPhoto";
 import { parseTripDraft } from "../shared/tripDraft";
+import { parseBatchDates } from "../shared/tripBatch";
 import { EXECUTION_STATUSES } from "../shared/tripOperations";
 import * as db from "./db";
 import { storageGetSignedUrl, storagePut } from "./storage";
@@ -47,6 +48,22 @@ export const appRouter = router({
         return draft;
       }),
       clear: protectedProcedure.mutation(async ({ ctx }) => ({ success: await db.clearTripDraftForOwner(ctx.user.id) })),
+    }),
+    template: router({
+      toggle: protectedProcedure.input(z.object({ tripId: z.number().int().positive(), isTemplate: z.boolean() })).mutation(async ({ ctx, input }) => {
+        const updated = await db.updateTripTemplateForOwner(ctx.user.id, input.tripId, input.isTemplate);
+        if (!updated) throw new TRPCError({ code: "FORBIDDEN", message: "반복 출장 템플릿은 계획 소유자만 관리할 수 있습니다." });
+        return { success: true, isTemplate: input.isTemplate } as const;
+      }),
+      createBatch: protectedProcedure.input(z.object({ templateId: z.number().int().positive(), dates: z.array(z.string()).min(1).max(31), titlePrefix: z.string().trim().max(120).default(""), managerName: z.string().trim().max(100).default(""), department: z.string().trim().max(100).optional() })).mutation(async ({ ctx, input }) => {
+        const parsedDates = parseBatchDates(input.dates);
+        if (parsedDates.invalid.length) throw new TRPCError({ code: "BAD_REQUEST", message: `유효하지 않은 날짜가 있습니다: ${parsedDates.invalid.join(", ")}` });
+        if (parsedDates.duplicates.length) throw new TRPCError({ code: "BAD_REQUEST", message: `중복된 날짜가 있습니다: ${parsedDates.duplicates.join(", ")}` });
+        if (!parsedDates.dates.length) throw new TRPCError({ code: "BAD_REQUEST", message: "생성할 출장 날짜를 선택해 주세요." });
+        const result = await db.createTripsFromTemplateForOwner(ctx.user.id, input.templateId, { ...input, dates: parsedDates.dates });
+        if (result.status === "forbidden") throw new TRPCError({ code: "FORBIDDEN", message: "반복 출장 템플릿을 찾을 수 없거나 사용할 권한이 없습니다." });
+        return result;
+      }),
     }),
     uploadPhoto: protectedProcedure.input(z.object({ fileName: z.string().trim().min(1).max(255), mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]), contentBase64: z.string().min(1).max(7_000_000) })).mutation(async ({ ctx, input }) => {
       const bytes = Buffer.from(input.contentBase64, "base64");

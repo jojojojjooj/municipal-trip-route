@@ -1,6 +1,8 @@
 import { and, asc, desc, eq, gte, inArray, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
+import { nanoid } from "nanoid";
 import { type InsertUser, tripCollaborators, tripDrafts, tripStopPhotos, tripStops, trips, users } from "../drizzle/schema";
+import { buildBatchTripTitle } from "../shared/tripBatch";
 import type { ExecutionStatus, TripChecklist } from "../shared/tripOperations";
 import { ENV } from "./_core/env";
 
@@ -169,6 +171,47 @@ export async function getTripForOwner(ownerId: number, tripId: number) {
   if (!db) return undefined;
   const trip = (await db.select().from(trips).where(and(eq(trips.id, tripId), eq(trips.ownerId, ownerId))).limit(1))[0];
   return trip ? hydrateTrip(trip.id) : undefined;
+}
+
+export async function updateTripTemplateForOwner(ownerId: number, tripId: number, isTemplate: boolean) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const result = await db.update(trips).set({ isTemplate }).where(and(eq(trips.id, tripId), eq(trips.ownerId, ownerId)));
+  return result[0].affectedRows > 0;
+}
+
+export async function createTripsFromTemplateForOwner(ownerId: number, templateId: number, input: { dates: string[]; titlePrefix: string; managerName: string; department?: string }) {
+  const source = await getTripForOwner(ownerId, templateId);
+  if (!source || !source.isTemplate) return { status: "forbidden" as const, trips: [] };
+  const fixedStart = source.fixedStartName && source.fixedStartAddress && source.fixedStartLatitude !== null && source.fixedStartLongitude !== null
+    ? { name: source.fixedStartName, address: source.fixedStartAddress, latitude: Number(source.fixedStartLatitude), longitude: Number(source.fixedStartLongitude) }
+    : null;
+  const generated = [];
+  for (const tripDate of input.dates) {
+    const trip = await createTrip(ownerId, {
+      title: buildBatchTripTitle(input.titlePrefix, tripDate),
+      tripDate,
+      managerName: input.managerName.trim() || source.managerName,
+      department: input.department?.trim() || source.department || undefined,
+      shareToken: nanoid(12),
+      fixedStart,
+      returnToStart: Boolean(source.returnToStart),
+      routeDistanceKm: Number(source.routeDistanceKm),
+      routeDurationMinutes: Number(source.routeDurationMinutes),
+      checklist: { preDeparture: false, onSite: false, wrapUp: false },
+      stops: source.stops.map((stop, index) => ({
+        name: stop.name,
+        address: stop.address,
+        latitude: Number(stop.latitude),
+        longitude: Number(stop.longitude),
+        sequence: index + 1,
+        note: stop.note ?? undefined,
+        executionStatus: "planned",
+      })),
+    });
+    if (trip) generated.push({ id: trip.id, title: trip.title, tripDate });
+  }
+  return { status: "created" as const, trips: generated };
 }
 
 export async function getTripForUser(userId: number, tripId: number) {

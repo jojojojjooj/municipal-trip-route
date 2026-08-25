@@ -1,0 +1,1 @@
+ALTER TABLE `trips` ADD `isTemplate` boolean DEFAULT false NOT NULL;

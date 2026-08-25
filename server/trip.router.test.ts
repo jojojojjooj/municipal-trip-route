@@ -19,6 +19,8 @@ const dbMocks = vi.hoisted(() => ({
   inviteTripCollaboratorForOwner: vi.fn(),
   removeTripCollaboratorForOwner: vi.fn(),
   getTripAnalyticsForUser: vi.fn(),
+  updateTripTemplateForOwner: vi.fn(),
+  createTripsFromTemplateForOwner: vi.fn(),
 }));
 
 vi.mock("./db", () => dbMocks);
@@ -78,6 +80,23 @@ describe("trip router", () => {
       returnToStart: true,
       stops: input.stops,
     }));
+  });
+
+  it("marks a saved trip as a repeatable template through the owner-only procedure", async () => {
+    dbMocks.updateTripTemplateForOwner.mockResolvedValue(true);
+
+    await expect(appRouter.createCaller(context()).trip.template.toggle({ tripId: 11, isTemplate: true })).resolves.toEqual({ success: true, isTemplate: true });
+    expect(dbMocks.updateTripTemplateForOwner).toHaveBeenCalledWith(7, 11, true);
+  });
+
+  it("validates batch dates before creating trips from a template", async () => {
+    dbMocks.createTripsFromTemplateForOwner.mockResolvedValue({ status: "created", trips: [{ id: 21, title: "정기 점검 · 2026-09-01", tripDate: "2026-09-01" }] });
+    const caller = appRouter.createCaller(context());
+
+    await expect(caller.trip.template.createBatch({ templateId: 11, dates: ["2026-09-12", "2026-09-01"], titlePrefix: "정기 점검", managerName: "담당자" })).resolves.toMatchObject({ status: "created" });
+    expect(dbMocks.createTripsFromTemplateForOwner).toHaveBeenCalledWith(7, 11, expect.objectContaining({ dates: ["2026-09-01", "2026-09-12"], titlePrefix: "정기 점검", managerName: "담당자" }));
+    await expect(caller.trip.template.createBatch({ templateId: 11, dates: ["2026-02-30"], titlePrefix: "정기 점검", managerName: "담당자" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(caller.trip.template.createBatch({ templateId: 11, dates: ["2026-09-01", "2026-09-01"], titlePrefix: "정기 점검", managerName: "담당자" })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("lists, deletes, and reads shared trip data through ownership-aware helpers", async () => {

@@ -31,6 +31,7 @@ export const trips = mysqlTable("trips", {
   onSiteChecked: boolean("onSiteChecked").notNull().default(false),
   wrapUpChecked: boolean("wrapUpChecked").notNull().default(false),
   reportDraft: mediumtext("reportDraft"),
+  isTemplate: boolean("isTemplate").notNull().default(false),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

@@ -36,6 +36,7 @@ import {
   type FieldRecordFilter,
 } from "@shared/fieldRecordFilters";
 import { addRecentSearch, removeRecentSearch } from "@shared/recentSearches";
+import { parseBatchDates } from "@shared/tripBatch";
 import { createNewTripDraft, hasNewTripContent } from "@shared/newTripPlan";
 import {
   makeTripStopsCsv,
@@ -1752,6 +1753,12 @@ export default function Home() {
   const [mapRetryRequestId, setMapRetryRequestId] = useState(0);
   const [csvImporting, setCsvImporting] = useState(false);
   const [calendarDownloading, setCalendarDownloading] = useState(false);
+  const [batchDialogOpen, setBatchDialogOpen] = useState(false);
+  const [batchTemplateId, setBatchTemplateId] = useState<number | null>(null);
+  const [batchDatesText, setBatchDatesText] = useState("");
+  const [batchTitlePrefix, setBatchTitlePrefix] = useState("");
+  const [batchManagerName, setBatchManagerName] = useState("");
+  const [batchDepartment, setBatchDepartment] = useState("");
   const reportRef = useRef<HTMLDivElement | null>(null);
   const fieldRecordPdfRef = useRef<HTMLDivElement | null>(null);
   const csvImportInputRef = useRef<HTMLInputElement | null>(null);
@@ -1849,6 +1856,18 @@ export default function Home() {
         resultReportDraft?.excludedEvidenceKeys
       ),
     [resultReportEvidence, resultReportDraft?.excludedEvidenceKeys]
+  );
+  const templatePlans = useMemo(
+    () => (plans.data ?? []).filter(plan => plan.isTemplate),
+    [plans.data]
+  );
+  const selectedBatchTemplate = useMemo(
+    () => templatePlans.find(plan => plan.id === batchTemplateId) ?? null,
+    [batchTemplateId, templatePlans]
+  );
+  const batchDatePreview = useMemo(
+    () => parseBatchDates(batchDatesText),
+    [batchDatesText]
   );
   const filteredPlans = useMemo(() => {
     const query = archiveQuery.trim().toLocaleLowerCase("ko-KR");
@@ -2496,6 +2515,28 @@ export default function Home() {
     },
     onError: error => toast.error(error.message),
   });
+  const toggleTripTemplate = trpc.trip.template.toggle.useMutation({
+    onSuccess: result => {
+      void utils.trip.list.invalidate();
+      toast.success(
+        result.isTemplate
+          ? "반복 출장 템플릿으로 지정했습니다."
+          : "반복 출장 템플릿 지정을 해제했습니다."
+      );
+    },
+    onError: error => toast.error(error.message),
+  });
+  const createBatchTrips = trpc.trip.template.createBatch.useMutation({
+    onSuccess: result => {
+      void utils.trip.list.invalidate();
+      setBatchDialogOpen(false);
+      setBatchTemplateId(null);
+      toast.success(
+        `${result.trips.length}개의 반복 출장 계획을 생성했습니다.`
+      );
+    },
+    onError: error => toast.error(error.message),
+  });
   const updateStopExecution = trpc.trip.updateStopExecution.useMutation({
     onSuccess: () => {
       if (selectedPlanId !== null)
@@ -2837,6 +2878,41 @@ export default function Home() {
           : "출장 계획을 복제하지 못했습니다."
       );
     }
+  };
+  const openBatchDialog = (plan: {
+    id: number;
+    title: string;
+    managerName: string;
+    department?: string | null;
+  }) => {
+    setBatchTemplateId(plan.id);
+    setBatchTitlePrefix(plan.title);
+    setBatchManagerName(plan.managerName);
+    setBatchDepartment(plan.department ?? "");
+    setBatchDatesText("");
+    setBatchDialogOpen(true);
+  };
+  const submitBatchGeneration = () => {
+    if (batchTemplateId === null)
+      return toast.error("반복 출장 템플릿을 선택해 주세요.");
+    const parsed = parseBatchDates(batchDatesText);
+    if (parsed.invalid.length)
+      return toast.error(
+        `유효하지 않은 날짜가 있습니다: ${parsed.invalid.join(", ")}`
+      );
+    if (parsed.duplicates.length)
+      return toast.error(
+        `중복된 날짜가 있습니다: ${parsed.duplicates.join(", ")}`
+      );
+    if (!parsed.dates.length)
+      return toast.info("생성할 출장 날짜를 입력해 주세요.");
+    createBatchTrips.mutate({
+      templateId: batchTemplateId,
+      dates: parsed.dates,
+      titlePrefix: batchTitlePrefix.trim(),
+      managerName: batchManagerName.trim(),
+      department: batchDepartment.trim() || undefined,
+    });
   };
   const downloadPdf = async () => {
     if (!destinations.length)
@@ -4279,9 +4355,16 @@ export default function Home() {
                     key={plan.id}
                     className="border border-black/15 bg-[#eee9de] p-5"
                   >
-                    <p className="section-label">
-                      {toIsoDate(plan.tripDate)} / {plan.managerName}
-                    </p>
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="section-label">
+                        {toIsoDate(plan.tripDate)} / {plan.managerName}
+                      </p>
+                      {plan.isTemplate ? (
+                        <span className="inline-flex shrink-0 items-center gap-1 border border-[#c4503d]/35 bg-[#f4e8da] px-2 py-1 text-[9px] font-bold tracking-[.06em] text-[#9c4538]">
+                          <Repeat2 className="h-3 w-3" /> 반복 템플릿
+                        </span>
+                      ) : null}
+                    </div>
                     <h3 className="font-display mt-3 text-3xl">{plan.title}</h3>
                     <p className="mt-4 text-sm text-stone-600">
                       {asNumber(plan.routeDistanceKm).toFixed(1)}km ·{" "}
@@ -4304,6 +4387,32 @@ export default function Home() {
                       >
                         <Copy className="mr-2 h-3.5 w-3.5" /> 복제
                       </Button>
+                      {plan.access === "owner" ? (
+                        <Button
+                          onClick={() =>
+                            toggleTripTemplate.mutate({
+                              tripId: plan.id,
+                              isTemplate: !plan.isTemplate,
+                            })
+                          }
+                          disabled={toggleTripTemplate.isPending}
+                          variant="outline"
+                          className="rounded-none border-[#c4503d]/35 bg-transparent text-[#9c4538]"
+                        >
+                          <Repeat2 className="mr-2 h-3.5 w-3.5" />{" "}
+                          {plan.isTemplate ? "템플릿 해제" : "템플릿 지정"}
+                        </Button>
+                      ) : null}
+                      {plan.isTemplate && plan.access === "owner" ? (
+                        <Button
+                          onClick={() => openBatchDialog(plan)}
+                          variant="outline"
+                          className="rounded-none border-[#2f6557]/35 bg-transparent text-[#2f6557]"
+                        >
+                          <CalendarDays className="mr-2 h-3.5 w-3.5" /> 일괄
+                          생성
+                        </Button>
+                      ) : null}
                       <Button
                         onClick={() => {
                           if (window.confirm("이 출장 계획을 삭제할까요?"))
@@ -5196,6 +5305,112 @@ export default function Home() {
               className="route-action-primary"
             >
               <Plus className="mr-2 h-4 w-4" /> 새 계획 시작
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={batchDialogOpen}
+        onOpenChange={open => {
+          setBatchDialogOpen(open);
+          if (!open) setBatchTemplateId(null);
+        }}
+      >
+        <DialogContent className="rounded-none border-[#1f2d2b]/20 bg-[#f7f2e9] p-5 sm:max-w-lg sm:p-7">
+          <DialogHeader>
+            <p className="section-label text-[#c4503d]">Repeat trip batch</p>
+            <DialogTitle className="font-display text-4xl font-normal">
+              반복 출장 일괄 생성
+            </DialogTitle>
+            <DialogDescription className="leading-6 text-stone-600">
+              {selectedBatchTemplate
+                ? `${selectedBatchTemplate.title}의 출발지·목적지·경로를 복사해 여러 날짜의 새 계획을 만듭니다.`
+                : "템플릿 정보를 불러오는 중입니다."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-5 grid gap-4">
+            <label className="editorial-label">
+              계획명 접두어
+              <Input
+                value={batchTitlePrefix}
+                onChange={event => setBatchTitlePrefix(event.target.value)}
+                placeholder="예: 하천 정기 점검"
+                className="editorial-input"
+              />
+            </label>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="editorial-label">
+                담당자
+                <Input
+                  value={batchManagerName}
+                  onChange={event => setBatchManagerName(event.target.value)}
+                  placeholder="비워두면 템플릿 담당자 사용"
+                  className="editorial-input"
+                />
+              </label>
+              <label className="editorial-label">
+                부서
+                <Input
+                  value={batchDepartment}
+                  onChange={event => setBatchDepartment(event.target.value)}
+                  placeholder="비워두면 템플릿 부서 사용"
+                  className="editorial-input"
+                />
+              </label>
+            </div>
+            <label className="editorial-label">
+              생성할 출장일{" "}
+              <textarea
+                value={batchDatesText}
+                onChange={event => setBatchDatesText(event.target.value)}
+                placeholder="날짜를 줄바꿈·쉼표·세미콜론으로 구분하세요. 예: 2026-09-01\n2026-09-15\n2026-10-01"
+                className="mt-2 min-h-28 w-full resize-y border border-black/15 bg-[#fffdf7]/70 p-3 text-sm font-medium tracking-normal text-[#1f2d2b] outline-none transition focus:border-[#c4503d]"
+                maxLength={4000}
+              />
+              <span className="mt-2 block font-normal tracking-normal text-stone-500">
+                {batchDatePreview.dates.length}개 생성 예정
+                {batchDatePreview.duplicates.length
+                  ? ` · 중복 ${batchDatePreview.duplicates.length}개`
+                  : ""}
+                {batchDatePreview.invalid.length
+                  ? ` · 형식 오류 ${batchDatePreview.invalid.length}개`
+                  : ""}
+              </span>
+            </label>
+            <div className="border-l-2 border-[#c4503d] bg-[#eee7da] px-3 py-2 text-xs leading-5 text-stone-600">
+              각 생성 계획은 체크리스트를 초기화하고 실행 상태를 ‘예정’으로
+              시작합니다. 템플릿의 사진과 기존 완료 상태는 복사하지 않습니다.
+            </div>
+          </div>
+          <div className="new-plan-dialog-actions">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setBatchDialogOpen(false)}
+              className="route-action-tertiary"
+            >
+              취소
+            </Button>
+            <Button
+              type="button"
+              onClick={submitBatchGeneration}
+              disabled={
+                createBatchTrips.isPending ||
+                !selectedBatchTemplate ||
+                !batchDatePreview.dates.length ||
+                batchDatePreview.invalid.length > 0 ||
+                batchDatePreview.duplicates.length > 0
+              }
+              className="route-action-primary"
+            >
+              {createBatchTrips.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Repeat2 className="mr-2 h-4 w-4" />
+              )}
+              {createBatchTrips.isPending
+                ? "생성 중"
+                : `${batchDatePreview.dates.length || 0}개 계획 생성`}
             </Button>
           </div>
         </DialogContent>
