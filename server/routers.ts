@@ -558,6 +558,46 @@ export const appRouter = router({
           });
         return logs;
       }),
+    expenses: router({
+      list: protectedProcedure
+        .input(z.object({ tripId: z.number().int().positive() }))
+        .query(async ({ ctx, input }) => {
+          const expenses = await db.listTripExpensesForUser(
+            ctx.user.id,
+            input.tripId
+          );
+          if (!expenses)
+            throw new TRPCError({
+              code: "FORBIDDEN",
+              message: "열람 권한이 없는 출장 계획입니다.",
+            });
+          return expenses;
+        }),
+      add: protectedProcedure
+        .input(
+          z.object({
+            tripId: z.number().int().positive(),
+            category: z.enum([
+              "transport",
+              "parking",
+              "meal",
+              "lodging",
+              "other",
+            ]),
+            amount: z.number().positive().max(100_000_000),
+            note: z.string().trim().max(500).optional(),
+          })
+        )
+        .mutation(async ({ ctx, input }) => {
+          const id = await db.addTripExpenseForUser(ctx.user.id, input);
+          if (!id)
+            throw new TRPCError({
+              code: "FORBIDDEN",
+              message: "편집 권한이 없는 출장 계획입니다.",
+            });
+          return { id };
+        }),
+    }),
     remove: protectedProcedure
       .input(z.object({ id: z.number().int().positive() }))
       .mutation(async ({ ctx, input }) => {

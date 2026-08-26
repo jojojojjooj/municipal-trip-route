@@ -107,6 +107,23 @@ export const tripAuditLogs = mysqlTable("tripAuditLogs", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+export const tripExpenses = mysqlTable("tripExpenses", {
+  id: int("id").autoincrement().primaryKey(),
+  tripId: int("tripId")
+    .notNull()
+    .references(() => trips.id, { onDelete: "cascade" }),
+  category: mysqlEnum("category", [
+    "transport",
+    "parking",
+    "meal",
+    "lodging",
+    "other",
+  ]).notNull(),
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  note: varchar("note", { length: 500 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export const tripCollaborators = mysqlTable(
   "tripCollaborators",
   {

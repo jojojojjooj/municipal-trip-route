@@ -6,6 +6,7 @@ import {
   tripCollaborators,
   tripAuditLogs,
   tripDrafts,
+  tripExpenses,
   tripStopPhotos,
   tripStops,
   trips,
@@ -531,6 +532,42 @@ export async function listTripAuditLogsForUser(userId: number, tripId: number) {
     .where(eq(tripAuditLogs.tripId, tripId))
     .orderBy(desc(tripAuditLogs.createdAt), desc(tripAuditLogs.id))
     .limit(100);
+}
+
+export async function listTripExpensesForUser(userId: number, tripId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  if (!(await getTripAccessForUser(userId, tripId))) return undefined;
+  return db
+    .select()
+    .from(tripExpenses)
+    .where(eq(tripExpenses.tripId, tripId))
+    .orderBy(desc(tripExpenses.createdAt), desc(tripExpenses.id));
+}
+
+export async function addTripExpenseForUser(
+  userId: number,
+  input: {
+    tripId: number;
+    category: "transport" | "parking" | "meal" | "lodging" | "other";
+    amount: number;
+    note?: string;
+  }
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const access = await getTripAccessForUser(userId, input.tripId);
+  if (!access || access === "viewer") return undefined;
+  const inserted = await db
+    .insert(tripExpenses)
+    .values({
+      tripId: input.tripId,
+      category: input.category,
+      amount: input.amount.toFixed(2),
+      note: input.note?.trim() || null,
+    })
+    .$returningId();
+  return inserted[0].id;
 }
 
 export async function updateTripStopExecutionForOwner(
