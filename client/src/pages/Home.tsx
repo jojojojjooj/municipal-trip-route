@@ -10,6 +10,11 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
+import {
+  listOfflineQueueTasks,
+  putOfflineQueueTask,
+  removeOfflineQueueTask,
+} from "@/lib/offlineQueueStore";
 import { trpc } from "@/lib/trpc";
 import { downloadTripPdf } from "@/lib/tripPdf";
 import { makeTripPhotoDataUrl } from "../../../shared/tripPhoto";
@@ -87,6 +92,14 @@ import {
 import { getTripReadiness } from "@shared/tripReadiness";
 import { getPwaNetworkStatusCopy } from "@shared/pwa";
 import {
+  getOfflineQueueSummary,
+  markOfflineQueueTaskRetry,
+  shouldDetectExecutionConflict,
+  type OfflinePhotoQueueTask,
+  type OfflineQueueTask,
+  type OfflineStopExecutionQueueTask,
+} from "@shared/offlineQueue";
+import {
   AlertTriangle,
   ArrowDown,
   ArrowUp,
@@ -133,6 +146,7 @@ type DestinationPhoto = {
   takenAt?: string;
   description?: string;
   dataUrl?: string;
+  offlineTaskId?: string;
 };
 type Destination = MapDestination & {
   photos?: DestinationPhoto[];
@@ -1718,6 +1732,10 @@ export default function Home() {
   );
   const [tripDate, setTripDate] = useState(today);
   const [departureTime, setDepartureTime] = useState("09:00");
+  const [offlineQueueTasks, setOfflineQueueTasks] = useState<
+    OfflineQueueTask[]
+  >([]);
+  const [offlineQueueSyncing, setOfflineQueueSyncing] = useState(false);
   const [managerName, setManagerName] = useState(() =>
     isDesignPreview ? "검증 담당" : ""
   );
@@ -2525,6 +2543,49 @@ export default function Home() {
     startNewPlan();
   };
   const uploadPhoto = trpc.trip.uploadPhoto.useMutation();
+  const refreshOfflineQueue = useCallback(async () => {
+    try {
+      setOfflineQueueTasks(await listOfflineQueueTasks());
+    } catch {
+      toast.error("오프라인 작업 보관함을 열지 못했습니다.");
+    }
+  }, []);
+  useEffect(() => {
+    void refreshOfflineQueue();
+  }, [refreshOfflineQueue]);
+  const queuePhotoUpload = useCallback(
+    async (
+      destinationId: string,
+      file: File,
+      contentBase64: string,
+      dataUrl: string
+    ) => {
+      const now = new Date().toISOString();
+      const task: OfflinePhotoQueueTask = {
+        id: crypto.randomUUID(),
+        kind: "photo_upload",
+        status: "pending",
+        createdAt: now,
+        attempts: 0,
+        nextRetryAt: now,
+        destinationId,
+        fileName: file.name,
+        mimeType: file.type as "image/jpeg" | "image/png" | "image/webp",
+        contentBase64,
+      };
+      await putOfflineQueueTask(task);
+      await refreshOfflineQueue();
+      return {
+        storageKey: `offline:${task.id}`,
+        url: dataUrl,
+        fileName: file.name,
+        takenAt: today,
+        dataUrl,
+        offlineTaskId: task.id,
+      } satisfies DestinationPhoto;
+    },
+    [refreshOfflineQueue]
+  );
   const addDestinationPhotos = async (id: string, files: FileList | null) => {
     const selectedFiles = Array.from(files ?? []);
     if (!selectedFiles.length) return;
@@ -2547,16 +2608,22 @@ export default function Home() {
             reader.onerror = () => reject(new Error("사진을 읽지 못했습니다."));
             reader.readAsDataURL(file);
           });
-          const uploaded = await uploadPhoto.mutateAsync({
-            fileName: file.name,
-            mimeType: file.type as "image/jpeg" | "image/png" | "image/webp",
-            contentBase64: base64,
-          });
-          return {
-            ...uploaded,
-            takenAt: today,
-            dataUrl: makeTripPhotoDataUrl(file.type, base64),
-          };
+          const dataUrl = makeTripPhotoDataUrl(file.type, base64);
+          if (!isOnline) return queuePhotoUpload(id, file, base64, dataUrl);
+          try {
+            const uploaded = await uploadPhoto.mutateAsync({
+              fileName: file.name,
+              mimeType: file.type as "image/jpeg" | "image/png" | "image/webp",
+              contentBase64: base64,
+            });
+            return {
+              ...uploaded,
+              takenAt: today,
+              dataUrl,
+            };
+          } catch {
+            return queuePhotoUpload(id, file, base64, dataUrl);
+          }
         })
       );
       updateDestinations(
@@ -2566,7 +2633,11 @@ export default function Home() {
             : item
         )
       );
-      toast.success(`${uploaded.length}장의 현장 사진을 첨부했습니다.`);
+      toast.success(
+        isOnline
+          ? `${uploaded.length}장의 현장 사진을 첨부했습니다.`
+          : `${uploaded.length}장의 현장 사진을 기기에 보관하고 전송 대기열에 넣었습니다.`
+      );
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "사진 첨부에 실패했습니다."
@@ -2623,6 +2694,139 @@ export default function Home() {
     },
     onError: error => toast.error(error.message),
   });
+  const syncOfflineQueue = useCallback(async () => {
+    if (!isOnline || offlineQueueSyncing) return;
+    const tasks = await listOfflineQueueTasks();
+    if (!tasks.some(task => task.status === "pending")) return;
+    setOfflineQueueSyncing(true);
+    try {
+      for (const task of tasks) {
+        if (task.status !== "pending") continue;
+        try {
+          if (task.kind === "photo_upload") {
+            const uploaded = await uploadPhoto.mutateAsync({
+              fileName: task.fileName,
+              mimeType: task.mimeType,
+              contentBase64: task.contentBase64,
+            });
+            setDestinations(previous =>
+              previous.map(destination =>
+                destination.id === task.destinationId
+                  ? {
+                      ...destination,
+                      photos: (destination.photos ?? []).map(photo =>
+                        (photo as DestinationPhoto).offlineTaskId === task.id
+                          ? {
+                              ...uploaded,
+                              takenAt: photo.takenAt,
+                              dataUrl: photo.dataUrl,
+                            }
+                          : photo
+                      ),
+                    }
+                  : destination
+              )
+            );
+            await removeOfflineQueueTask(task.id);
+            continue;
+          }
+          const remoteTrip = await utils.trip.get.fetch({ id: task.tripId });
+          const remoteStop = remoteTrip.stops.find(
+            stop => Number(stop.id) === task.stopId
+          );
+          const remoteExecutionStatus = remoteStop?.executionStatus;
+          if (!remoteExecutionStatus) {
+            await putOfflineQueueTask(markOfflineQueueTaskRetry(task));
+            continue;
+          }
+          if (
+            shouldDetectExecutionConflict({
+              baseExecutionStatus: task.baseExecutionStatus,
+              intendedExecutionStatus: task.executionStatus,
+              remoteExecutionStatus,
+            })
+          ) {
+            await putOfflineQueueTask({
+              ...task,
+              status: "conflict",
+              remoteExecutionStatus,
+            });
+            continue;
+          }
+          await updateStopExecution.mutateAsync({
+            stopId: task.stopId,
+            executionStatus: task.executionStatus,
+            completedAt: task.completedAt,
+            issueNote: task.issueNote,
+            issueOwner: task.issueOwner,
+            issueDueAt: task.issueDueAt,
+            issueResolvedAt: task.issueResolvedAt,
+          });
+          await removeOfflineQueueTask(task.id);
+        } catch {
+          await putOfflineQueueTask(markOfflineQueueTaskRetry(task));
+        }
+      }
+    } finally {
+      setOfflineQueueSyncing(false);
+      await refreshOfflineQueue();
+    }
+  }, [
+    isOnline,
+    offlineQueueSyncing,
+    refreshOfflineQueue,
+    updateStopExecution,
+    uploadPhoto,
+    utils.trip.get,
+  ]);
+  useEffect(() => {
+    if (isOnline) void syncOfflineQueue();
+  }, [isOnline, syncOfflineQueue]);
+  const queueStopExecution = useCallback(
+    async (
+      task: Omit<
+        OfflineStopExecutionQueueTask,
+        "id" | "kind" | "status" | "createdAt" | "attempts" | "nextRetryAt"
+      >
+    ) => {
+      const now = new Date().toISOString();
+      await putOfflineQueueTask({
+        ...task,
+        id: crypto.randomUUID(),
+        kind: "stop_execution",
+        status: "pending",
+        createdAt: now,
+        attempts: 0,
+        nextRetryAt: now,
+      });
+      await refreshOfflineQueue();
+    },
+    [refreshOfflineQueue]
+  );
+  const resolveOfflineQueueConflicts = async (
+    strategy: "keep_remote" | "apply_local"
+  ) => {
+    const conflicts = offlineQueueTasks.filter(
+      task => task.status === "conflict"
+    );
+    await Promise.all(
+      conflicts.map(task => {
+        if (strategy === "keep_remote") return removeOfflineQueueTask(task.id);
+        if (task.kind !== "stop_execution")
+          return removeOfflineQueueTask(task.id);
+        return putOfflineQueueTask({
+          ...task,
+          status: "pending",
+          baseExecutionStatus:
+            task.remoteExecutionStatus ?? task.baseExecutionStatus,
+          remoteExecutionStatus: undefined,
+          nextRetryAt: new Date().toISOString(),
+        });
+      })
+    );
+    await refreshOfflineQueue();
+    if (strategy === "apply_local" && isOnline) await syncOfflineQueue();
+  };
   const updateChecklist = trpc.trip.updateChecklist.useMutation({
     onSuccess: () => {
       if (selectedPlanId !== null)
@@ -2718,7 +2922,7 @@ export default function Home() {
       )
     );
     if (selectedPlanId !== null && /^\d+$/.test(destinationId)) {
-      updateStopExecution.mutate({
+      const input = {
         stopId: Number(destinationId),
         executionStatus,
         completedAt: completedAt ?? null,
@@ -2726,6 +2930,23 @@ export default function Home() {
         issueOwner: next.issueOwner ?? null,
         issueDueAt: next.issueDueAt ?? null,
         issueResolvedAt: next.issueResolvedAt ?? null,
+      };
+      const queueTask = () =>
+        queueStopExecution({
+          tripId: selectedPlanId,
+          ...input,
+          baseExecutionStatus: current.executionStatus ?? "planned",
+        });
+      if (!isOnline) {
+        void queueTask();
+        toast.info("현장 상태 변경을 기기에 보관하고 연결 복구를 기다립니다.");
+        return;
+      }
+      void updateStopExecution.mutateAsync(input).catch(() => {
+        void queueTask();
+        toast.info(
+          "저장에 실패해 현장 상태 변경을 재시도 대기열에 보관했습니다."
+        );
       });
     }
   };
@@ -3435,6 +3656,54 @@ export default function Home() {
                 {pwaNetworkStatusCopy.detail}
               </small>
             </span>
+          </div>
+        ) : null}
+        {activeWorkspace === "planner" && offlineQueueTasks.length ? (
+          <div
+            className="mt-3 border border-[#c4503d]/30 bg-[#fff7f0] px-4 py-3 text-xs text-[#713a2f]"
+            role="status"
+          >
+            <strong>
+              현장 동기화 대기 {getOfflineQueueSummary(offlineQueueTasks).total}
+              건
+            </strong>
+            <span className="ml-2 text-stone-600">
+              사진 {getOfflineQueueSummary(offlineQueueTasks).photos}건 · 상태
+              변경 {getOfflineQueueSummary(offlineQueueTasks).executionUpdates}
+              건 · 충돌 {getOfflineQueueSummary(offlineQueueTasks).conflicts}건
+            </span>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="font-bold underline"
+                disabled={!isOnline || offlineQueueSyncing}
+                onClick={() => void syncOfflineQueue()}
+              >
+                {offlineQueueSyncing ? "동기화 중" : "지금 동기화"}
+              </button>
+              {getOfflineQueueSummary(offlineQueueTasks).conflicts ? (
+                <>
+                  <button
+                    type="button"
+                    className="underline"
+                    onClick={() =>
+                      void resolveOfflineQueueConflicts("apply_local")
+                    }
+                  >
+                    내 변경 적용
+                  </button>
+                  <button
+                    type="button"
+                    className="underline"
+                    onClick={() =>
+                      void resolveOfflineQueueConflicts("keep_remote")
+                    }
+                  >
+                    서버 상태 유지
+                  </button>
+                </>
+              ) : null}
+            </div>
           </div>
         ) : null}
         <div className={activeWorkspace === "planner" ? "" : "hidden"}>
