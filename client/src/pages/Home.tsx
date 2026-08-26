@@ -91,6 +91,7 @@ import {
 } from "@shared/pdfReport";
 import { getTripReadiness } from "@shared/tripReadiness";
 import { getPwaNetworkStatusCopy } from "@shared/pwa";
+import { getTripPreflight } from "@shared/tripPreflight";
 import {
   getOfflineQueueSummary,
   markOfflineQueueTaskRetry,
@@ -1979,6 +1980,35 @@ export default function Home() {
       }),
     [departureTime, destinations, routeSummary.estimatedMinutes, tripDate]
   );
+  const tripPreflight = useMemo(
+    () =>
+      getTripPreflight({
+        title,
+        managerName,
+        destinationCount: destinations.length,
+        invalidWindows: constrainedSchedule.stops.filter(
+          stop => stop.status === "invalid_window"
+        ).length,
+        lateVisits: constrainedSchedule.stops.filter(
+          stop => stop.status === "late"
+        ).length,
+        preDepartureChecked: checklist.preDeparture,
+        offlinePending: offlineQueueTasks.filter(
+          task => task.status === "pending"
+        ).length,
+        offlineConflicts: offlineQueueTasks.filter(
+          task => task.status === "conflict"
+        ).length,
+      }),
+    [
+      checklist.preDeparture,
+      constrainedSchedule.stops,
+      destinations.length,
+      managerName,
+      offlineQueueTasks,
+      title,
+    ]
+  );
   const visitSchedule = constrainedSchedule.stops;
   const pdfRoutePoints = useMemo(
     () =>
@@ -3709,6 +3739,35 @@ export default function Home() {
               ) : null}
             </div>
           </div>
+        ) : null}
+        {activeWorkspace === "planner" ? (
+          <section
+            className="mt-3 border border-[#1f2d2b]/20 bg-[#fffdf7] px-4 py-3"
+            aria-label="출장 출발 전 점검"
+          >
+            <p className="text-xs font-bold text-[#1f2d2b]">
+              출발 전 점검 ·{" "}
+              {tripPreflight.status === "blocked"
+                ? "출발 차단"
+                : tripPreflight.status === "warning"
+                  ? "주의 필요"
+                  : "출발 가능"}
+            </p>
+            <ul className="mt-2 space-y-1 text-xs text-stone-600">
+              {tripPreflight.items.slice(0, 3).map(item => (
+                <li key={`${item.level}-${item.label}`}>
+                  <strong>
+                    {item.level === "blocker"
+                      ? "차단"
+                      : item.level === "warning"
+                        ? "주의"
+                        : "준비"}
+                  </strong>{" "}
+                  · {item.label}: {item.detail}
+                </li>
+              ))}
+            </ul>
+          </section>
         ) : null}
         <div className={activeWorkspace === "planner" ? "" : "hidden"}>
           <section
