@@ -288,6 +288,8 @@ export async function getTripAnalyticsForUser(
       trips: 0,
       completed: 0,
       issues: 0,
+      distanceKm: 0,
+      durationMinutes: 0,
     };
   });
   if (!db)
@@ -300,6 +302,8 @@ export async function getTripAnalyticsForUser(
       completionRate: 0,
       openIssues: 0,
       resolvedIssues: 0,
+      totalDistanceKm: 0,
+      totalDurationMinutes: 0,
       monthly: months,
       departments: [],
     };
@@ -308,6 +312,8 @@ export async function getTripAnalyticsForUser(
       tripId: trips.id,
       tripDate: trips.tripDate,
       department: trips.department,
+      routeDistanceKm: trips.routeDistanceKm,
+      routeDurationMinutes: trips.routeDurationMinutes,
       status: tripStops.executionStatus,
       issueResolvedAt: tripStops.issueResolvedAt,
     })
@@ -331,6 +337,8 @@ export async function getTripAnalyticsForUser(
   let completedStops = 0;
   let openIssues = 0;
   let resolvedIssues = 0;
+  let totalDistanceKm = 0;
+  let totalDurationMinutes = 0;
   const monthMap = new Map(months.map(month => [month.key, month]));
   const departmentMap = new Map<
     string,
@@ -343,7 +351,15 @@ export async function getTripAnalyticsForUser(
     );
     if (!tripIds.has(row.tripId)) {
       tripIds.add(row.tripId);
-      if (month) month.trips += 1;
+      const distanceKm = Number(row.routeDistanceKm ?? 0);
+      const durationMinutes = row.routeDurationMinutes ?? 0;
+      totalDistanceKm += distanceKm;
+      totalDurationMinutes += durationMinutes;
+      if (month) {
+        month.trips += 1;
+        month.distanceKm += distanceKm;
+        month.durationMinutes += durationMinutes;
+      }
     }
     totalStops += 1;
     const department = row.department?.trim() || "미분류";
@@ -388,6 +404,8 @@ export async function getTripAnalyticsForUser(
       : 0,
     openIssues,
     resolvedIssues,
+    totalDistanceKm: Math.round(totalDistanceKm * 10) / 10,
+    totalDurationMinutes,
     monthly: months,
     departments,
   };

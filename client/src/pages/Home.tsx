@@ -5020,6 +5020,16 @@ export default function Home() {
                 <small>권한 있는 출장 기준</small>
               </article>
               <article>
+                <span>이동 규모</span>
+                <strong>
+                  {analytics.data?.totalDistanceKm ?? 0}
+                  <em>km</em>
+                </strong>
+                <small>
+                  예상 이동 {analytics.data?.totalDurationMinutes ?? 0}분
+                </small>
+              </article>
+              <article>
                 <span>목적지 완료율</span>
                 <strong>
                   {analytics.data?.completionRate ?? 0}
