@@ -484,6 +484,30 @@ export async function getTripForUser(userId: number, tripId: number) {
   return trip ? { ...trip, access } : undefined;
 }
 
+export async function listTripAuditLogsForUser(userId: number, tripId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not available");
+  const access = await getTripAccessForUser(userId, tripId);
+  if (!access) return undefined;
+  return db
+    .select({
+      id: tripAuditLogs.id,
+      action: tripAuditLogs.action,
+      entityType: tripAuditLogs.entityType,
+      entityId: tripAuditLogs.entityId,
+      beforeSnapshot: tripAuditLogs.beforeSnapshot,
+      afterSnapshot: tripAuditLogs.afterSnapshot,
+      createdAt: tripAuditLogs.createdAt,
+      actorName: users.name,
+      actorEmail: users.email,
+    })
+    .from(tripAuditLogs)
+    .innerJoin(users, eq(tripAuditLogs.actorUserId, users.id))
+    .where(eq(tripAuditLogs.tripId, tripId))
+    .orderBy(desc(tripAuditLogs.createdAt), desc(tripAuditLogs.id))
+    .limit(100);
+}
+
 export async function updateTripStopExecutionForOwner(
   ownerId: number,
   stopId: number,

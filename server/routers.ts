@@ -530,6 +530,20 @@ export const appRouter = router({
           });
         return trip;
       }),
+    auditLogs: protectedProcedure
+      .input(z.object({ tripId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        const logs = await db.listTripAuditLogsForUser(
+          ctx.user.id,
+          input.tripId
+        );
+        if (!logs)
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "열람 권한이 없는 출장 계획입니다.",
+          });
+        return logs;
+      }),
     remove: protectedProcedure
       .input(z.object({ id: z.number().int().positive() }))
       .mutation(async ({ ctx, input }) => {
