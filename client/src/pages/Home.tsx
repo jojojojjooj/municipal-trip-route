@@ -2869,6 +2869,48 @@ export default function Home() {
     await refreshOfflineQueue();
     if (strategy === "apply_local" && isOnline) await syncOfflineQueue();
   };
+  const retryFailedOfflineTasks = async () => {
+    const now = new Date().toISOString();
+    await Promise.all(
+      offlineQueueTasks
+        .filter(task => task.status === "failed")
+        .map(task =>
+          putOfflineQueueTask({
+            ...task,
+            status: "pending",
+            attempts: 0,
+            nextRetryAt: now,
+          })
+        )
+    );
+    await refreshOfflineQueue();
+    if (isOnline) await syncOfflineQueue();
+  };
+  const discardFailedOfflineTasks = async () => {
+    const failedPhotos = new Set(
+      offlineQueueTasks
+        .filter(
+          task => task.status === "failed" && task.kind === "photo_upload"
+        )
+        .map(task => task.id)
+    );
+    await Promise.all(
+      offlineQueueTasks
+        .filter(task => task.status === "failed")
+        .map(task => removeOfflineQueueTask(task.id))
+    );
+    if (failedPhotos.size)
+      setDestinations(previous =>
+        previous.map(destination => ({
+          ...destination,
+          photos: (destination.photos ?? []).filter(
+            photo =>
+              !failedPhotos.has((photo as DestinationPhoto).offlineTaskId ?? "")
+          ),
+        }))
+      );
+    await refreshOfflineQueue();
+  };
   const updateChecklist = trpc.trip.updateChecklist.useMutation({
     onSuccess: () => {
       if (selectedPlanId !== null)
@@ -3742,6 +3784,24 @@ export default function Home() {
                     }
                   >
                     서버 상태 유지
+                  </button>
+                </>
+              ) : null}
+              {getOfflineQueueSummary(offlineQueueTasks).failed ? (
+                <>
+                  <button
+                    type="button"
+                    className="underline"
+                    onClick={() => void retryFailedOfflineTasks()}
+                  >
+                    실패 작업 재시도
+                  </button>
+                  <button
+                    type="button"
+                    className="underline"
+                    onClick={() => void discardFailedOfflineTasks()}
+                  >
+                    실패 작업 삭제
                   </button>
                 </>
               ) : null}

@@ -53,25 +53,39 @@ const fixedStartInput = z.object({
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
 });
-const tripInput = z.object({
-  title: z.string().trim().min(1).max(150),
-  tripDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  managerName: z.string().trim().min(1).max(100),
-  department: z.string().trim().max(100).optional(),
-  fixedStart: fixedStartInput.nullable(),
-  returnToStart: z.boolean(),
-  routeDistanceKm: z.number().min(0),
-  routeDurationMinutes: z.number().int().min(0),
-  departureTime: timeOfDayInput.default("09:00"),
-  checklist: z
-    .object({
-      preDeparture: z.boolean(),
-      onSite: z.boolean(),
-      wrapUp: z.boolean(),
-    })
-    .default({ preDeparture: false, onSite: false, wrapUp: false }),
-  stops: z.array(destinationInput).min(1).max(30),
-});
+const tripInput = z
+  .object({
+    title: z.string().trim().min(1).max(150),
+    tripDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    managerName: z.string().trim().min(1).max(100),
+    department: z.string().trim().max(100).optional(),
+    fixedStart: fixedStartInput.nullable(),
+    returnToStart: z.boolean(),
+    routeDistanceKm: z.number().min(0),
+    routeDurationMinutes: z.number().int().min(0),
+    departureTime: timeOfDayInput.default("09:00"),
+    checklist: z
+      .object({
+        preDeparture: z.boolean(),
+        onSite: z.boolean(),
+        wrapUp: z.boolean(),
+      })
+      .default({ preDeparture: false, onSite: false, wrapUp: false }),
+    stops: z.array(destinationInput).min(1).max(30),
+  })
+  .superRefine((input, context) => {
+    const sequences = new Set<number>();
+    input.stops.forEach((stop, index) => {
+      if (sequences.has(stop.sequence)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["stops", index, "sequence"],
+          message: "방문 순서는 중복될 수 없습니다.",
+        });
+      }
+      sequences.add(stop.sequence);
+    });
+  });
 
 type KakaoDocument = {
   address_name?: string;
