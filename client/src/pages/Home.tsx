@@ -2797,8 +2797,16 @@ export default function Home() {
             issueResolvedAt: task.issueResolvedAt,
           });
           await removeOfflineQueueTask(task.id);
-        } catch {
-          await putOfflineQueueTask(markOfflineQueueTaskRetry(task));
+        } catch (error) {
+          const errorCode =
+            error && typeof error === "object" && "data" in error
+              ? (error as { data?: { code?: string } }).data?.code
+              : undefined;
+          if (errorCode === "FORBIDDEN" || errorCode === "NOT_FOUND") {
+            await putOfflineQueueTask({ ...task, status: "failed" });
+          } else {
+            await putOfflineQueueTask(markOfflineQueueTaskRetry(task));
+          }
         }
       }
     } finally {
@@ -5486,16 +5494,21 @@ export default function Home() {
                 </p>
               ) : auditLogs.data?.length ? (
                 auditLogs.data.map(log => {
-                  const before = log.beforeSnapshot
-                    ? (JSON.parse(log.beforeSnapshot) as {
-                        executionStatus?: string;
-                      })
-                    : {};
-                  const after = log.afterSnapshot
-                    ? (JSON.parse(log.afterSnapshot) as {
-                        executionStatus?: string;
-                      })
-                    : {};
+                  const readStatus = (snapshot: string | null) => {
+                    if (!snapshot) return undefined;
+                    try {
+                      const parsed = JSON.parse(snapshot) as {
+                        executionStatus?: unknown;
+                      };
+                      return typeof parsed.executionStatus === "string"
+                        ? parsed.executionStatus
+                        : undefined;
+                    } catch {
+                      return undefined;
+                    }
+                  };
+                  const beforeStatus = readStatus(log.beforeSnapshot);
+                  const afterStatus = readStatus(log.afterSnapshot);
                   return (
                     <article
                       key={log.id}
@@ -5506,8 +5519,8 @@ export default function Home() {
                         · 목적지 실행 상태 변경
                       </p>
                       <p className="mt-1 text-xs text-stone-600">
-                        {before.executionStatus ?? "기록 없음"} →{" "}
-                        {after.executionStatus ?? "기록 없음"} ·{" "}
+                        {beforeStatus ?? "기록 없음"} →{" "}
+                        {afterStatus ?? "기록 없음"} ·{" "}
                         {new Intl.DateTimeFormat("ko-KR", {
                           dateStyle: "short",
                           timeStyle: "short",

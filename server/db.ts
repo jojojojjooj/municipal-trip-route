@@ -166,36 +166,43 @@ export async function createTrip(ownerId: number, input: CreateTripInput) {
       })
       .$returningId();
     const id = inserted[0].id;
-    const insertedStops = await tx
-      .insert(tripStops)
-      .values(
-        input.stops.map(stop => ({
-          tripId: id,
-          name: stop.name,
-          address: stop.address,
-          latitude: stop.latitude.toFixed(7),
-          longitude: stop.longitude.toFixed(7),
-          sequence: stop.sequence,
-          note: stop.note?.trim() || null,
-          serviceMinutes: stop.serviceMinutes ?? 20,
-          windowStart: stop.windowStart || null,
-          windowEnd: stop.windowEnd || null,
-          executionStatus: stop.executionStatus ?? "planned",
-          completedAt: stop.completedAt ? new Date(stop.completedAt) : null,
-          issueNote: stop.issueNote?.trim() || null,
-          issueOwner: stop.issueOwner?.trim() || null,
-          issueDueAt: stop.issueDueAt
-            ? new Date(`${stop.issueDueAt}T00:00:00.000Z`)
-            : null,
-          issueResolvedAt: stop.issueResolvedAt
-            ? new Date(stop.issueResolvedAt)
-            : null,
-        }))
-      )
-      .$returningId();
-    const photoValues = input.stops.flatMap((stop, index) =>
-      (stop.photos ?? []).map(photo => ({
-        tripStopId: insertedStops[index].id,
+    await tx.insert(tripStops).values(
+      input.stops.map(stop => ({
+        tripId: id,
+        name: stop.name,
+        address: stop.address,
+        latitude: stop.latitude.toFixed(7),
+        longitude: stop.longitude.toFixed(7),
+        sequence: stop.sequence,
+        note: stop.note?.trim() || null,
+        serviceMinutes: stop.serviceMinutes ?? 20,
+        windowStart: stop.windowStart || null,
+        windowEnd: stop.windowEnd || null,
+        executionStatus: stop.executionStatus ?? "planned",
+        completedAt: stop.completedAt ? new Date(stop.completedAt) : null,
+        issueNote: stop.issueNote?.trim() || null,
+        issueOwner: stop.issueOwner?.trim() || null,
+        issueDueAt: stop.issueDueAt
+          ? new Date(`${stop.issueDueAt}T00:00:00.000Z`)
+          : null,
+        issueResolvedAt: stop.issueResolvedAt
+          ? new Date(stop.issueResolvedAt)
+          : null,
+      }))
+    );
+    const persistedStops = await tx
+      .select({ id: tripStops.id, sequence: tripStops.sequence })
+      .from(tripStops)
+      .where(eq(tripStops.tripId, id));
+    const stopIdBySequence = new Map(
+      persistedStops.map(stop => [stop.sequence, stop.id])
+    );
+    const photoValues = input.stops.flatMap(stop => {
+      const tripStopId = stopIdBySequence.get(stop.sequence);
+      if (tripStopId === undefined)
+        throw new Error("출장 목적지 사진을 연결할 수 없습니다.");
+      return (stop.photos ?? []).map(photo => ({
+        tripStopId,
         storageKey: photo.storageKey,
         url: photo.url,
         fileName: photo.fileName,
@@ -203,8 +210,8 @@ export async function createTrip(ownerId: number, input: CreateTripInput) {
           ? new Date(`${photo.takenAt}T00:00:00.000Z`)
           : null,
         description: photo.description?.trim() || null,
-      }))
-    );
+      }));
+    });
     if (photoValues.length) await tx.insert(tripStopPhotos).values(photoValues);
     return id;
   });
