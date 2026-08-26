@@ -1842,6 +1842,10 @@ export default function Home() {
     { id: selectedPlanId ?? 0 },
     { enabled: selectedPlanId !== null }
   );
+  const auditLogs = trpc.trip.auditLogs.useQuery(
+    { tripId: selectedPlanId ?? 0 },
+    { enabled: selectedPlanId !== null && activeWorkspace === "operations" }
+  );
   const collaborators = trpc.trip.collaborators.list.useQuery(
     { tripId: selectedPlanId ?? 0 },
     {
@@ -5390,6 +5394,65 @@ export default function Home() {
                 </div>
               )}
             </section>
+          </section>
+        ) : null}
+        {activeWorkspace === "operations" && selectedPlanId !== null ? (
+          <section
+            className="collaboration-panel print:hidden"
+            aria-label="출장 변경 이력"
+          >
+            <header className="operations-panel-heading">
+              <div>
+                <p className="section-label text-[#c4503d]">Audit trail</p>
+                <h3>변경 이력</h3>
+              </div>
+              <span className="text-xs text-stone-500">
+                최근 100건 · 권한 사용자만 열람
+              </span>
+            </header>
+            <div className="mt-4 space-y-3">
+              {auditLogs.isLoading ? (
+                <p className="text-sm text-stone-500">
+                  변경 이력을 불러오는 중입니다.
+                </p>
+              ) : auditLogs.data?.length ? (
+                auditLogs.data.map(log => {
+                  const before = log.beforeSnapshot
+                    ? (JSON.parse(log.beforeSnapshot) as {
+                        executionStatus?: string;
+                      })
+                    : {};
+                  const after = log.afterSnapshot
+                    ? (JSON.parse(log.afterSnapshot) as {
+                        executionStatus?: string;
+                      })
+                    : {};
+                  return (
+                    <article
+                      key={log.id}
+                      className="border-l-2 border-[#c4503d] bg-[#fffdf7] px-4 py-3"
+                    >
+                      <p className="text-sm font-bold">
+                        {log.actorName || log.actorEmail || "알 수 없는 사용자"}{" "}
+                        · 목적지 실행 상태 변경
+                      </p>
+                      <p className="mt-1 text-xs text-stone-600">
+                        {before.executionStatus ?? "기록 없음"} →{" "}
+                        {after.executionStatus ?? "기록 없음"} ·{" "}
+                        {new Intl.DateTimeFormat("ko-KR", {
+                          dateStyle: "short",
+                          timeStyle: "short",
+                        }).format(new Date(log.createdAt))}
+                      </p>
+                    </article>
+                  );
+                })
+              ) : (
+                <p className="text-sm text-stone-500">
+                  아직 기록된 변경 이력이 없습니다.
+                </p>
+              )}
+            </div>
           </section>
         ) : null}
         {activeWorkspace === "operations" && selectedPlanId !== null ? (
