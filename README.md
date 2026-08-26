@@ -29,7 +29,7 @@ pnpm test
 pnpm dev
 ```
 
-실행 전에는 데이터베이스, 세션, 카카오맵, OAuth, 사진 저장소의 환경변수를 별도 설정해야 합니다. 실제 비밀값은 커밋하지 마십시오. 한 명이 로컬에서 사용하는 경우에는 [PERSONAL_API_SETUP.md](./PERSONAL_API_SETUP.md)의 개인용 API 설정을 따르고, 외부 호스팅·도메인 연결은 [EXTERNAL_DEPLOYMENT.md](./EXTERNAL_DEPLOYMENT.md)를 참고하십시오.
+실행 전에는 데이터베이스, 세션, 카카오맵, OAuth, 사진 저장소의 환경변수를 별도 설정해야 합니다. 실제 비밀값은 커밋하지 마십시오. 한 명이 개인 DB와 localhost에서 사용하는 경우에는 [PERSONAL_LOCAL_GUIDE.md](./PERSONAL_LOCAL_GUIDE.md)를 먼저 따르십시오. 이 방식은 공개 홈페이지·도메인·상시 호스팅 없이 사용할 수 있습니다.
 
 ## 환경 설정 요약
 

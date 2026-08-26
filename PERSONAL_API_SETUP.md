@@ -1,6 +1,6 @@
 # 개인용 API 설정
 
-이 문서는 한 명이 자신의 컴퓨터에서 출장동선을 실행하는 경우를 위한 설정입니다. 실제 비밀값은 절대로 저장소에 넣지 말고 `.env`에만 보관합니다.
+이 문서는 한 명이 자신의 컴퓨터에서 출장동선을 실행하는 경우를 위한 설정입니다. 실제 비밀값은 절대로 저장소에 넣지 말고 `.env`에만 보관합니다. **처음 설정하는 경우에는 [PERSONAL_LOCAL_GUIDE.md](./PERSONAL_LOCAL_GUIDE.md)를 먼저 따르십시오.**
 
 ## 1. 개인 설정 파일 만들기
 
@@ -21,7 +21,7 @@ pnpm db:push
 
 ## 3. 카카오 지도·주소 검색
 
-`VITE_KAKAO_MAP_APP_KEY`에는 JavaScript 키를, `KAKAO_REST_API_KEY`에는 REST API 키를 넣습니다. 카카오 플랫폼의 Web 도메인에 `http://localhost:3000`과 필요 시 `http://localhost:3001`을 등록합니다. 지도 표시는 JavaScript 키, 주소 검색과 역지오코딩은 REST 키를 사용합니다.
+`VITE_KAKAO_MAP_APP_KEY`에는 JavaScript 키를, `KAKAO_REST_API_KEY`에는 REST API 키를 넣습니다. 카카오 플랫폼의 Web 도메인에 `http://localhost:3000`과 필요 시 실제 개발 서버 포트(예: `http://localhost:3001`)를 등록합니다. 지도 표시는 JavaScript 키, 주소 검색과 역지오코딩은 REST 키를 사용하며 REST 키에는 절대로 `VITE_` 접두사를 붙이지 않습니다.
 
 ## 4. 사진·보고서 파일 저장
 
