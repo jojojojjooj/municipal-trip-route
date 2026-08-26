@@ -1,5 +1,9 @@
 import { trpc } from "@/lib/trpc";
-import { COOKIE_NAME, UNAUTHED_ERR_MSG } from '@shared/const';
+import {
+  PWA_SERVICE_WORKER_URL,
+  shouldRegisterPwaServiceWorker,
+} from "@shared/pwa";
+import { COOKIE_NAME, UNAUTHED_ERR_MSG } from "@shared/const";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink, TRPCClientError } from "@trpc/client";
 import { createRoot } from "react-dom/client";
@@ -7,6 +11,18 @@ import superjson from "superjson";
 import App from "./App";
 import { startLogin } from "./const";
 import "./index.css";
+
+if (
+  shouldRegisterPwaServiceWorker({
+    isProduction: import.meta.env.PROD,
+    isSupported: "serviceWorker" in navigator,
+    search: window.location.search,
+  })
+) {
+  navigator.serviceWorker.register(PWA_SERVICE_WORKER_URL).catch(error => {
+    console.warn("[PWA] 서비스 워커 등록에 실패했습니다.", error);
+  });
+}
 
 const queryClient = new QueryClient();
 

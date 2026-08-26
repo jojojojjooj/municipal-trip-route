@@ -1,0 +1,18 @@
+{
+  "name": "출장동선",
+  "short_name": "출장동선",
+  "description": "지자체 출장 경로와 현장 운영을 관리하는 개인용 도구",
+  "lang": "ko",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f2e9",
+  "theme_color": "#1f2d2b",
+  "icons": [
+    {
+      "src": "/pwa-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { trpc } from "@/lib/trpc";
 import { downloadTripPdf } from "@/lib/tripPdf";
 import { makeTripPhotoDataUrl } from "../../../shared/tripPhoto";
@@ -84,6 +85,7 @@ import {
   makeTripResultReportPdfFileName,
 } from "@shared/pdfReport";
 import { getTripReadiness } from "@shared/tripReadiness";
+import { getPwaNetworkStatusCopy } from "@shared/pwa";
 import {
   AlertTriangle,
   ArrowDown,
@@ -1709,6 +1711,8 @@ export default function Home() {
   const isRoundTripPreview =
     import.meta.env.DEV &&
     previewParams.get("round-trip-preview") === "complete";
+  const isOnline = useNetworkStatus();
+  const pwaNetworkStatusCopy = getPwaNetworkStatusCopy(isOnline);
   const [title, setTitle] = useState(() =>
     isDesignPreview ? "현장 운영 고도화 검증" : ""
   );
@@ -3407,6 +3411,30 @@ export default function Home() {
                 임시 초안 비우기
               </button>
             ) : null}
+          </div>
+        ) : null}
+        {activeWorkspace === "planner" ? (
+          <div
+            className={
+              isOnline
+                ? "mt-3 flex items-start gap-3 border border-[#2f6557]/25 bg-[#edf3ed] px-4 py-3 text-[#244c42]"
+                : "mt-3 flex items-start gap-3 border border-[#c4503d]/35 bg-[#fff1eb] px-4 py-3 text-[#8a3e30]"
+            }
+            role="status"
+          >
+            {isOnline ? (
+              <Cloud className="mt-0.5 h-4 w-4 shrink-0" />
+            ) : (
+              <CloudOff className="mt-0.5 h-4 w-4 shrink-0" />
+            )}
+            <span className="min-w-0">
+              <strong className="block text-xs font-bold">
+                {pwaNetworkStatusCopy.title}
+              </strong>
+              <small className="mt-0.5 block text-xs leading-5 opacity-80">
+                {pwaNetworkStatusCopy.detail}
+              </small>
+            </span>
           </div>
         ) : null}
         <div className={activeWorkspace === "planner" ? "" : "hidden"}>

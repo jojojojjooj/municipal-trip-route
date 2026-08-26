@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="출장동선">
+  <rect width="512" height="512" rx="112" fill="#1f2d2b"/>
+  <path d="M112 154h288v68H112z" fill="#f7f2e9"/>
+  <path d="M112 290h288v68H112z" fill="#d66b55"/>
+  <path d="M190 222v68m132-68v68" stroke="#f7f2e9" stroke-width="28" stroke-linecap="round"/>
+  <circle cx="190" cy="324" r="25" fill="#1f2d2b"/>
+  <circle cx="322" cy="188" r="25" fill="#1f2d2b"/>
+</svg>
