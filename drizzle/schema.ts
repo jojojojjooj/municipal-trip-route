@@ -91,6 +91,22 @@ export const tripStops = mysqlTable("tripStops", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+export const tripAuditLogs = mysqlTable("tripAuditLogs", {
+  id: int("id").autoincrement().primaryKey(),
+  tripId: int("tripId")
+    .notNull()
+    .references(() => trips.id, { onDelete: "cascade" }),
+  actorUserId: int("actorUserId")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  action: varchar("action", { length: 80 }).notNull(),
+  entityType: varchar("entityType", { length: 40 }).notNull(),
+  entityId: int("entityId"),
+  beforeSnapshot: mediumtext("beforeSnapshot"),
+  afterSnapshot: mediumtext("afterSnapshot"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export const tripCollaborators = mysqlTable(
   "tripCollaborators",
   {
@@ -139,5 +155,6 @@ export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type Trip = typeof trips.$inferSelect;
 export type TripStop = typeof tripStops.$inferSelect;
+export type TripAuditLog = typeof tripAuditLogs.$inferSelect;
 export type TripCollaborator = typeof tripCollaborators.$inferSelect;
 export type TripDraft = typeof tripDrafts.$inferSelect;

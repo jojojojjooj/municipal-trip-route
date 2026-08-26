@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 import {
   type InsertUser,
   tripCollaborators,
+  tripAuditLogs,
   tripDrafts,
   tripStopPhotos,
   tripStops,
@@ -540,7 +541,15 @@ export async function updateTripStopExecutionForUser(
   if (!db) throw new Error("Database is not available");
   const stop = (
     await db
-      .select({ tripId: tripStops.tripId })
+      .select({
+        tripId: tripStops.tripId,
+        executionStatus: tripStops.executionStatus,
+        completedAt: tripStops.completedAt,
+        issueNote: tripStops.issueNote,
+        issueOwner: tripStops.issueOwner,
+        issueDueAt: tripStops.issueDueAt,
+        issueResolvedAt: tripStops.issueResolvedAt,
+      })
       .from(tripStops)
       .where(eq(tripStops.id, stopId))
       .limit(1)
@@ -562,6 +571,22 @@ export async function updateTripStopExecutionForUser(
         : null,
     })
     .where(eq(tripStops.id, stopId));
+  await db.insert(tripAuditLogs).values({
+    tripId: stop.tripId,
+    actorUserId: userId,
+    action: "stop_execution_updated",
+    entityType: "trip_stop",
+    entityId: stopId,
+    beforeSnapshot: JSON.stringify({
+      executionStatus: stop.executionStatus,
+      completedAt: stop.completedAt,
+      issueNote: stop.issueNote,
+      issueOwner: stop.issueOwner,
+      issueDueAt: stop.issueDueAt,
+      issueResolvedAt: stop.issueResolvedAt,
+    }),
+    afterSnapshot: JSON.stringify(input),
+  });
   return true;
 }
 
